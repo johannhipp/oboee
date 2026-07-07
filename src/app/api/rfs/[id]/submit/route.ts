@@ -2,7 +2,7 @@ import { api } from "../../../../../../convex/_generated/api";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { fetchAuthMutation, isAuthenticated } from "@/lib/auth-server";
 
-import { errorResponse, errorResponseFrom, okWriteResponse } from "../../../_lib/responses";
+import { errorResponse, errorResponseFrom } from "../../../_lib/responses";
 
 const MAX_TEST_AMOUNT_BASE_UNITS = BigInt(9_000);
 
@@ -63,7 +63,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       purchasePriceBaseUnits,
     });
 
-    return okWriteResponse("rfs", result.rfsId, result.nextState);
+    return Response.json({
+      status: "ok",
+      resourceType: "rfs",
+      resourceId: result.rfsId,
+      nextState: result.nextState,
+      skillId: result.skillId,
+      skillVersionId: result.skillVersionId,
+      version: result.version,
+      contentHash: result.contentHash,
+      evaluationDeadline: result.evaluationDeadline,
+      payoutAssessmentId: result.payoutAssessmentId,
+    });
   } catch (error) {
     return errorResponseFrom(error);
   }

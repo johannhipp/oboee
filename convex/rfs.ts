@@ -1,17 +1,46 @@
 import { ConvexError, v } from "convex/values";
 
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { authComponent } from "./auth";
 
 const walletAddressValidator = /^0x[a-fA-F0-9]{40}$/;
+const EVALUATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const rfsStatusValidator = v.union(
   v.literal("open"),
   v.literal("funded"),
-  v.literal("fulfilled"),
+  v.literal("assigned"),
+  v.literal("submitted"),
+  v.literal("evaluation_open"),
+  v.literal("accepted"),
+  v.literal("revision_requested"),
+  v.literal("disputed"),
+  v.literal("rejected"),
   v.literal("published"),
   v.literal("cancelled"),
+  v.literal("fulfilled"),
+);
+
+const skillStatusValidator = v.union(
+  v.literal("draft"),
+  v.literal("submitted"),
+  v.literal("evaluation_open"),
+  v.literal("accepted"),
+  v.literal("revision_requested"),
+  v.literal("disputed"),
+  v.literal("rejected"),
+  v.literal("published"),
+);
+
+const payoutAssessmentStatusValidator = v.union(
+  v.literal("pending"),
+  v.literal("claimable"),
+  v.literal("reduced"),
+  v.literal("blocked"),
+  v.literal("disputed"),
+  v.literal("manually_resolved"),
+  v.literal("claimed"),
 );
 
 const rfsDocValidator = v.object({
@@ -28,6 +57,47 @@ const rfsDocValidator = v.object({
   currentAmountBaseUnits: v.int64(),
   fundingTokenAddress: v.string(),
   status: rfsStatusValidator,
+});
+
+const skillVersionValidator = v.object({
+  _id: v.id("skillVersions"),
+  _creationTime: v.number(),
+  skillId: v.id("skills"),
+  rfsId: v.id("rfs"),
+  version: v.number(),
+  contentHash: v.string(),
+  contentMarkdown: v.string(),
+  summary: v.string(),
+  tags: v.array(v.string()),
+  purchasePriceBaseUnits: v.int64(),
+  authorUserId: v.string(),
+  status: skillStatusValidator,
+  submittedAt: v.number(),
+  evaluationDeadline: v.number(),
+  acceptedAt: v.optional(v.number()),
+  publishedAt: v.optional(v.number()),
+  revisionOfVersion: v.optional(v.number()),
+});
+
+const payoutAssessmentValidator = v.object({
+  _id: v.id("payoutAssessments"),
+  _creationTime: v.number(),
+  rfsId: v.id("rfs"),
+  skillId: v.id("skills"),
+  skillVersionId: v.id("skillVersions"),
+  skillVersion: v.number(),
+  authorUserId: v.string(),
+  grossAmountBaseUnits: v.int64(),
+  basePayoutBaseUnits: v.int64(),
+  qualityMultiplierBps: v.number(),
+  finalPayoutBaseUnits: v.int64(),
+  platformFeeBaseUnits: v.int64(),
+  unreleasedAmountBaseUnits: v.int64(),
+  status: payoutAssessmentStatusValidator,
+  assessmentReason: v.string(),
+  evaluationWindowOpenedAt: v.number(),
+  evaluationWindowClosedAt: v.optional(v.number()),
+  resolvedAt: v.optional(v.number()),
 });
 
 const cleanTags = (tags: string[]) =>
@@ -67,6 +137,60 @@ const getRfsByIdOrThrow = async (ctx: MutationCtx | QueryCtx, rfsId: Doc<"rfs">[
   return rfs;
 };
 
+const stableContentHash = (parts: string[]) => {
+  let hash = BigInt("0xcbf29ce484222325");
+  const prime = BigInt("0x100000001b3");
+  const mask = BigInt("0xffffffffffffffff");
+  const input = parts.join("\u001f");
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= BigInt(input.charCodeAt(index));
+    hash = (hash * prime) & mask;
+  }
+  return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
+};
+
+const sumAcceptedContributions = async (ctx: MutationCtx, rfs: Doc<"rfs">) => {
+  const acceptedContributions = await ctx.db
+    .query("contributions")
+    .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
+    .collect();
+
+  let grossAmountBaseUnits = BigInt(0);
+  for (const contribution of acceptedContributions) {
+    if (contribution.status === "accepted") {
+      grossAmountBaseUnits += contribution.amountBaseUnits;
+    }
+  }
+  return grossAmountBaseUnits;
+};
+
+const getLatestSkillVersion = async (ctx: QueryCtx | MutationCtx, skillId: Id<"skills">) => {
+  const versions = await ctx.db
+    .query("skillVersions")
+    .withIndex("by_skill", (q) => q.eq("skillId", skillId))
+    .collect();
+  return versions.sort((a, b) => b.version - a.version)[0];
+};
+
+const getLatestAssessment = async (ctx: QueryCtx | MutationCtx, rfsId: Id<"rfs">) => {
+  const assessments = await ctx.db
+    .query("payoutAssessments")
+    .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
+    .collect();
+  return assessments.sort((a, b) => b._creationTime - a._creationTime)[0];
+};
+
+const userBackedRfs = async (ctx: QueryCtx | MutationCtx, rfsId: Id<"rfs">, userId: string) => {
+  const contributions = await ctx.db
+    .query("contributions")
+    .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
+    .collect();
+  return contributions.some(
+    (contribution) =>
+      contribution.status === "accepted" && contribution.backerUserId === userId,
+  );
+};
+
 export const create = mutation({
   args: {
     title: v.string(),
@@ -93,10 +217,7 @@ export const create = mutation({
       throw new ConvexError({ code: "INVALID_TITLE", message: "Title is required." });
     }
     if (!description) {
-      throw new ConvexError({
-        code: "INVALID_DESCRIPTION",
-        message: "Description is required.",
-      });
+      throw new ConvexError({ code: "INVALID_DESCRIPTION", message: "Description is required." });
     }
     if (!scope) {
       throw new ConvexError({ code: "INVALID_SCOPE", message: "Scope is required." });
@@ -150,8 +271,14 @@ export const get = query({
   },
   returns: v.object({
     rfs: rfsDocValidator,
+    latestSkillVersion: v.optional(skillVersionValidator),
+    payoutAssessment: v.optional(payoutAssessmentValidator),
+    evaluationCount: v.number(),
     canFund: v.boolean(),
     canClaim: v.boolean(),
+    canEvaluate: v.boolean(),
+    canRevise: v.boolean(),
+    canClaimPayout: v.boolean(),
     hasClaimant: v.boolean(),
   }),
   handler: async (ctx, args) => {
@@ -161,11 +288,57 @@ export const get = query({
       throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
     }
 
+    const skill = await ctx.db
+      .query("skills")
+      .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
+      .first();
+    const latestSkillVersion = skill ? await getLatestSkillVersion(ctx, skill._id) : undefined;
+    const payoutAssessment = await getLatestAssessment(ctx, rfs._id);
+    const evaluations = await ctx.db
+      .query("evaluationEvents")
+      .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
+      .collect();
+
+    const viewer = await authComponent.safeGetAuthUser(ctx);
+    const viewerId = viewer?._id;
     const hasClaimant = Boolean(rfs.claimantUserId);
     const canFund = rfs.status === "open";
     const canClaim = rfs.status === "funded" && !hasClaimant;
+    const viewerIsBacker = viewerId ? await userBackedRfs(ctx, rfs._id, viewerId) : false;
+    const viewerCanAccessEvaluation = Boolean(
+      viewerId &&
+        latestSkillVersion &&
+        (rfs.authorUserId === viewerId || viewerIsBacker || rfs.claimantUserId === viewerId),
+    );
+    const canEvaluate = Boolean(
+      viewerCanAccessEvaluation &&
+        rfs.claimantUserId !== viewerId &&
+        (rfs.status === "evaluation_open" || rfs.status === "disputed"),
+    );
+    const canRevise = Boolean(viewerId && rfs.claimantUserId === viewerId && rfs.status === "revision_requested");
+    const canClaimPayout = Boolean(
+      viewerId &&
+        rfs.claimantUserId === viewerId &&
+        rfs.status === "published" &&
+        payoutAssessment &&
+        (payoutAssessment.status === "claimable" ||
+          payoutAssessment.status === "reduced" ||
+          payoutAssessment.status === "manually_resolved") &&
+        payoutAssessment.finalPayoutBaseUnits > BigInt(0),
+    );
 
-    return { rfs, canFund, canClaim, hasClaimant };
+    return {
+      rfs,
+      latestSkillVersion,
+      payoutAssessment,
+      evaluationCount: evaluations.length,
+      canFund,
+      canClaim,
+      canEvaluate,
+      canRevise,
+      canClaimPayout,
+      hasClaimant,
+    };
   },
 });
 
@@ -246,25 +419,26 @@ export const claim = mutation({
     if (rfs.status !== "funded") {
       throw new ConvexError({
         code: "INVALID_STATE",
-        message: "RFS can only be claimed while funded.",
+        message: "RFS can only be assigned while funded.",
       });
     }
 
     if (rfs.claimantUserId && rfs.claimantUserId !== callerUserId) {
       throw new ConvexError({
         code: "ALREADY_CLAIMED",
-        message: "RFS has already been claimed.",
+        message: "RFS has already been assigned.",
       });
     }
 
-    if (!rfs.claimantUserId) {
-      await ctx.db.patch(rfs._id, { claimantUserId: callerUserId });
-    }
+    await ctx.db.patch(rfs._id, {
+      claimantUserId: callerUserId,
+      status: "assigned",
+    });
 
     return {
       rfsId: rfs._id,
       claimantUserId: callerUserId,
-      nextState: rfs.status,
+      nextState: "assigned" as const,
     };
   },
 });
@@ -280,6 +454,11 @@ export const submit = mutation({
   returns: v.object({
     rfsId: v.id("rfs"),
     skillId: v.id("skills"),
+    skillVersionId: v.id("skillVersions"),
+    version: v.number(),
+    contentHash: v.string(),
+    evaluationDeadline: v.number(),
+    payoutAssessmentId: v.id("payoutAssessments"),
     nextState: rfsStatusValidator,
   }),
   handler: async (ctx, args) => {
@@ -289,37 +468,25 @@ export const submit = mutation({
     const tags = cleanTags(args.tags);
 
     if (!contentMarkdown) {
-      throw new ConvexError({
-        code: "INVALID_CONTENT",
-        message: "Skill content is required.",
-      });
+      throw new ConvexError({ code: "INVALID_CONTENT", message: "Skill content is required." });
     }
     if (!summary) {
-      throw new ConvexError({
-        code: "INVALID_SUMMARY",
-        message: "Skill summary is required.",
-      });
+      throw new ConvexError({ code: "INVALID_SUMMARY", message: "Skill summary is required." });
     }
     if (args.purchasePriceBaseUnits < BigInt(1)) {
-      throw new ConvexError({
-        code: "INVALID_PRICE",
-        message: "Purchase price must be at least 1 base unit.",
-      });
+      throw new ConvexError({ code: "INVALID_PRICE", message: "Purchase price must be at least 1 base unit." });
     }
 
     const rfs = await getRfsByIdOrThrow(ctx, args.rfsId);
 
     if (rfs.claimantUserId !== callerUserId) {
-      throw new ConvexError({
-        code: "FORBIDDEN",
-        message: "Only the claimant can submit this RFS.",
-      });
+      throw new ConvexError({ code: "FORBIDDEN", message: "Only the assigned claimant can submit this RFS." });
     }
 
-    if (rfs.status !== "funded" && rfs.status !== "fulfilled" && rfs.status !== "published") {
+    if (rfs.status !== "assigned" && rfs.status !== "revision_requested") {
       throw new ConvexError({
         code: "INVALID_STATE",
-        message: "RFS must be funded before submission.",
+        message: "RFS must be assigned or awaiting revision before submission.",
       });
     }
 
@@ -328,7 +495,42 @@ export const submit = mutation({
       .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
       .first();
 
-    let skillId = existingSkill?._id;
+    const previousVersion = existingSkill ? await getLatestSkillVersion(ctx, existingSkill._id) : undefined;
+    const version = (previousVersion?.version ?? 0) + 1;
+    if (version > 2) {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only one revision window is supported in the MVP.",
+      });
+    }
+
+    const contentHash = stableContentHash([
+      rfs._id,
+      version.toString(),
+      contentMarkdown,
+      summary,
+      tags.join(","),
+      args.purchasePriceBaseUnits.toString(),
+    ]);
+
+    const now = Date.now();
+    const evaluationDeadline = now + EVALUATION_WINDOW_MS;
+    const grossAmountBaseUnits = await sumAcceptedContributions(ctx, rfs);
+    const { platformFeeBaseUnits, netAmountBaseUnits } = computeFeeSplit(grossAmountBaseUnits);
+
+    const skillId = existingSkill
+      ? existingSkill._id
+      : await ctx.db.insert("skills", {
+          rfsId: rfs._id,
+          authorUserId: callerUserId,
+          contentMarkdown,
+          summary,
+          tags,
+          purchasePriceBaseUnits: args.purchasePriceBaseUnits,
+          latestVersion: version,
+          latestContentHash: contentHash,
+          status: "evaluation_open",
+        });
 
     if (existingSkill) {
       await ctx.db.patch(existingSkill._id, {
@@ -337,82 +539,87 @@ export const submit = mutation({
         summary,
         tags,
         purchasePriceBaseUnits: args.purchasePriceBaseUnits,
-        status: "published",
-      });
-    } else {
-      skillId = await ctx.db.insert("skills", {
-        rfsId: rfs._id,
-        authorUserId: callerUserId,
-        contentMarkdown,
-        summary,
-        tags,
-        purchasePriceBaseUnits: args.purchasePriceBaseUnits,
-        status: "published",
+        latestVersion: version,
+        latestContentHash: contentHash,
+        status: "evaluation_open",
       });
     }
 
-    if (rfs.status === "funded") {
-      await ctx.db.patch(rfs._id, { status: "fulfilled" });
-    }
-    if (rfs.status !== "published") {
-      await ctx.db.patch(rfs._id, { status: "published" });
-    }
+    const skillVersionId = await ctx.db.insert("skillVersions", {
+      skillId,
+      rfsId: rfs._id,
+      version,
+      contentHash,
+      contentMarkdown,
+      summary,
+      tags,
+      purchasePriceBaseUnits: args.purchasePriceBaseUnits,
+      authorUserId: callerUserId,
+      status: "evaluation_open",
+      submittedAt: now,
+      evaluationDeadline,
+      acceptedAt: undefined,
+      publishedAt: undefined,
+      revisionOfVersion: previousVersion?.version,
+    });
 
-    const acceptedContributions = await ctx.db
-      .query("contributions")
-      .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
-      .collect();
-
-    const qualifyingBackers = new Set<string>();
-    let grossAmountBaseUnits = BigInt(0);
-
-    for (const contribution of acceptedContributions) {
-      if (contribution.status !== "accepted") {
-        continue;
-      }
-      grossAmountBaseUnits += contribution.amountBaseUnits;
-      if (contribution.amountBaseUnits >= rfs.minimumContributionBaseUnits) {
-        qualifyingBackers.add(contribution.backerUserId);
-      }
-    }
-
-    for (const userId of qualifyingBackers) {
-      const existingGrant = await ctx.db
-        .query("accessGrants")
-        .withIndex("by_user_skill", (q) => q.eq("userId", userId).eq("skillId", skillId!))
-        .first();
-      if (!existingGrant) {
-        await ctx.db.insert("accessGrants", {
-          userId,
-          skillId: skillId!,
-          source: "backer_unlock",
-        });
-      }
-    }
-
-    const existingPayoutLedger = await ctx.db
+    const existingLedger = await ctx.db
       .query("payoutLedger")
       .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
       .first();
 
-    if (!existingPayoutLedger) {
-      const { platformFeeBaseUnits, netAmountBaseUnits } =
-        computeFeeSplit(grossAmountBaseUnits);
-
+    if (existingLedger) {
+      await ctx.db.patch(existingLedger._id, {
+        researcherUserId: callerUserId,
+        grossAmountBaseUnits,
+        platformFeeBaseUnits,
+        netAmountBaseUnits,
+        status: "locked",
+        receiptReference: undefined,
+      });
+    } else {
       await ctx.db.insert("payoutLedger", {
         rfsId: rfs._id,
         researcherUserId: callerUserId,
         grossAmountBaseUnits,
         platformFeeBaseUnits,
         netAmountBaseUnits,
-        status: "claimable",
+        status: "locked",
+        receiptReference: undefined,
       });
     }
 
+    const payoutAssessmentId = await ctx.db.insert("payoutAssessments", {
+      rfsId: rfs._id,
+      skillId,
+      skillVersionId,
+      skillVersion: version,
+      authorUserId: callerUserId,
+      grossAmountBaseUnits,
+      basePayoutBaseUnits: netAmountBaseUnits,
+      qualityMultiplierBps: 0,
+      finalPayoutBaseUnits: BigInt(0),
+      platformFeeBaseUnits,
+      unreleasedAmountBaseUnits: netAmountBaseUnits,
+      status: "pending",
+      assessmentReason:
+        "Evaluation opened. One negative review can dispute or hold payout, but reduction or blocking requires independent evidence-backed corroboration.",
+      evaluationWindowOpenedAt: now,
+      evaluationWindowClosedAt: undefined,
+      resolvedAt: undefined,
+    });
+
+    await ctx.db.patch(rfs._id, { status: "evaluation_open" });
+
     return {
       rfsId: rfs._id,
-      skillId: skillId!,
-      nextState: "published" as const,
+      skillId,
+      skillVersionId,
+      version,
+      contentHash,
+      evaluationDeadline,
+      payoutAssessmentId,
+      nextState: "evaluation_open" as const,
     };
   },
 });

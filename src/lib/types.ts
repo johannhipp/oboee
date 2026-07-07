@@ -1,4 +1,35 @@
-export type RFSStatus = "open" | "funded" | "fulfilled" | "published"
+export type RFSStatus =
+  | "open"
+  | "funded"
+  | "assigned"
+  | "submitted"
+  | "evaluation_open"
+  | "accepted"
+  | "revision_requested"
+  | "disputed"
+  | "rejected"
+  | "published"
+  | "cancelled"
+  | "fulfilled"
+
+export type SkillVersionStatus =
+  | "draft"
+  | "submitted"
+  | "evaluation_open"
+  | "accepted"
+  | "revision_requested"
+  | "disputed"
+  | "rejected"
+  | "published"
+
+export type PayoutAssessmentStatus =
+  | "pending"
+  | "claimable"
+  | "reduced"
+  | "blocked"
+  | "disputed"
+  | "manually_resolved"
+  | "claimed"
 
 export interface User {
   id: string

@@ -3,16 +3,28 @@ import Link from "next/link"
 import { fetchQuery } from "convex/nextjs"
 import { api } from "../../../convex/_generated/api"
 import { RFSRow } from "@/components/rfs-row"
+import { DataToast, SkeletonRows } from "@/components/data-fallback"
 import { toRfsViewModel } from "@/lib/view-models"
+import { convexUnavailableMessage } from "@/lib/auth-server"
 
 export const dynamic = "force-dynamic"
 
 export const metadata: Metadata = { title: "Browse | Oboe" }
 
-const statusOrder = ["open", "funded", "fulfilled", "published"] as const
+const statusOrder = [
+  "open",
+  "funded",
+  "assigned",
+  "evaluation_open",
+  "disputed",
+  "revision_requested",
+  "published",
+  "rejected",
+  "cancelled",
+] as const
 
-const isStatus = (value: string | undefined) =>
-  value === "open" || value === "funded" || value === "published"
+const isStatus = (value: string | undefined): value is (typeof statusOrder)[number] =>
+  statusOrder.some((status) => status === value)
 
 export default async function BrowsePage({
   searchParams,
@@ -22,8 +34,15 @@ export default async function BrowsePage({
   const params = await searchParams
   const status = isStatus(params.status) ? params.status : undefined
   const q = params.q?.trim().toLowerCase() ?? ""
+  let dataUnavailable = false
+  let rows: Awaited<typeof api.rfs.list._returnType> = []
 
-  const rows = await fetchQuery(api.rfs.list, { status })
+  try {
+    rows = await fetchQuery(api.rfs.list, { status })
+  } catch {
+    dataUnavailable = true
+  }
+
   const filtered = rows.filter((rfs) => {
     if (!q) {
       return true
@@ -37,9 +56,9 @@ export default async function BrowsePage({
   const sortedRfs = filtered
     .map(toRfsViewModel)
     .sort((a, b) => {
-      const aIdx = statusOrder.indexOf(a.status)
-      const bIdx = statusOrder.indexOf(b.status)
-      if (aIdx !== bIdx) return aIdx - bIdx
+      const aIdx = statusOrder.indexOf(a.status as (typeof statusOrder)[number])
+      const bIdx = statusOrder.indexOf(b.status as (typeof statusOrder)[number])
+      if (aIdx !== bIdx) return (aIdx === -1 ? statusOrder.length : aIdx) - (bIdx === -1 ? statusOrder.length : bIdx)
       if (a.status === "open" && b.status === "open") {
         const aRatio = a.fundingThreshold > 0 ? a.currentAmount / a.fundingThreshold : 0
         const bRatio = b.fundingThreshold > 0 ? b.currentAmount / b.fundingThreshold : 0
@@ -52,16 +71,16 @@ export default async function BrowsePage({
     { label: "all", href: "/browse", active: !status },
     { label: "open", href: "/browse?status=open", active: status === "open" },
     { label: "funded", href: "/browse?status=funded", active: status === "funded" },
-    {
-      label: "published",
-      href: "/browse?status=published",
-      active: status === "published",
-    },
+    { label: "in review", href: "/browse?status=evaluation_open", active: status === "evaluation_open" },
+    { label: "disputed", href: "/browse?status=disputed", active: status === "disputed" },
+    { label: "revision", href: "/browse?status=revision_requested", active: status === "revision_requested" },
+    { label: "published", href: "/browse?status=published", active: status === "published" },
   ]
 
   return (
     <section>
       <h1 className="text-xl font-medium tracking-tight mb-6 mt-8">Browse</h1>
+      {dataUnavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
 
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         {pills.map((pill) => (
@@ -92,14 +111,16 @@ export default async function BrowsePage({
       <div className="flex items-center gap-4 px-3 py-2 text-xs font-mono uppercase text-muted-foreground border-b border-gray-200 mb-1">
         <span className="w-6 text-right">#</span>
         <span className="flex-1">title</span>
-        <span className="w-20">status</span>
+        <span className="w-28">status</span>
         <span className="w-28 text-right">funded</span>
         <span className="w-24">author</span>
       </div>
 
-      {sortedRfs.map((rfs, i) => (
-        <RFSRow key={rfs.id} rfs={rfs} rank={i + 1} />
-      ))}
+      {dataUnavailable ? (
+        <SkeletonRows count={6} />
+      ) : (
+        sortedRfs.map((rfs, i) => <RFSRow key={rfs.id} rfs={rfs} rank={i + 1} />)
+      )}
     </section>
   )
 }

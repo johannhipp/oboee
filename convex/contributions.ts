@@ -6,9 +6,16 @@ import { authComponent } from "./auth";
 const rfsStatusValidator = v.union(
   v.literal("open"),
   v.literal("funded"),
-  v.literal("fulfilled"),
+  v.literal("assigned"),
+  v.literal("submitted"),
+  v.literal("evaluation_open"),
+  v.literal("accepted"),
+  v.literal("revision_requested"),
+  v.literal("disputed"),
+  v.literal("rejected"),
   v.literal("published"),
   v.literal("cancelled"),
+  v.literal("fulfilled"),
 );
 
 export const recordContribution = mutation({

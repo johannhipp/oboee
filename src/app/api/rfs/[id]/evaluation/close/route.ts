@@ -10,26 +10,22 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const body = (await request.json()) as { claimGroupId?: unknown };
-    if (typeof body.claimGroupId !== "string" || !body.claimGroupId.trim()) {
-      return errorResponse("INVALID_ARGUMENT", "claimGroupId must be a non-empty string.", 400);
-    }
-
+    const body = (await request.json().catch(() => ({}))) as { force?: unknown };
     const { id } = await context.params;
-    const result = await fetchAuthMutation(api.payouts.claimPayout, {
+    const result = await fetchAuthMutation(api.evaluations.closeEvaluation, {
       rfsId: id as Id<"rfs">,
-      claimGroupId: body.claimGroupId.trim(),
+      force: body.force === true,
     });
 
     return Response.json({
       status: "ok",
-      resourceType: "payout",
+      resourceType: "payoutAssessment",
       resourceId: result.rfsId,
-      nextState: result.status,
-      claimedAmountBaseUnits: result.claimedAmountBaseUnits.toString(),
-      finalPayoutBaseUnits: result.finalPayoutBaseUnits.toString(),
-      qualityMultiplierBps: result.qualityMultiplierBps,
+      nextState: result.nextState,
       assessmentStatus: result.assessmentStatus,
+      qualityMultiplierBps: result.qualityMultiplierBps,
+      finalPayoutBaseUnits: result.finalPayoutBaseUnits.toString(),
+      assessmentReason: result.assessmentReason,
     });
   } catch (error) {
     return errorResponseFrom(error);

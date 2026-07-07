@@ -4,21 +4,33 @@ import { api } from "../../convex/_generated/api"
 import { RFSRow } from "@/components/rfs-row"
 import { AsciiBox } from "@/components/ascii-box"
 import { CopyBox } from "@/components/copy-box"
+import { DataToast, SkeletonRows } from "@/components/data-fallback"
 import { toRfsViewModel } from "@/lib/view-models"
+import { convexUnavailableMessage } from "@/lib/auth-server"
 
 export const dynamic = "force-dynamic"
 
 export default async function Home() {
-  const [openRows, publishedRows] = await Promise.all([
-    fetchQuery(api.rfs.list, { status: "open" }),
-    fetchQuery(api.rfs.list, { status: "published" }),
-  ])
+  let dataUnavailable = false
+  let openRows: Awaited<typeof api.rfs.list._returnType> = []
+  let publishedRows: Awaited<typeof api.rfs.list._returnType> = []
+
+  try {
+    ;[openRows, publishedRows] = await Promise.all([
+      fetchQuery(api.rfs.list, { status: "open" }),
+      fetchQuery(api.rfs.list, { status: "published" }),
+    ])
+  } catch {
+    dataUnavailable = true
+  }
 
   const openRequests = openRows.map(toRfsViewModel)
   const recentlyPublished = publishedRows.map(toRfsViewModel).slice(0, 4)
 
   return (
     <main className="my-8 max-w-2xl mx-auto">
+      {dataUnavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
+
       <div className="flex flex-col items-center text-center">
         <pre className="text-[15px] tracking-[-1px] leading-[125%] text-gray-400 select-none whitespace-pre font-[family-name:var(--font-fira-mono)]">
           {OBOE_ASCII}
@@ -42,9 +54,11 @@ export default async function Home() {
           open requests
         </h2>
         <AsciiBox title="open">
-          {openRequests.map((rfs, i) => (
-            <RFSRow key={rfs.id} rfs={rfs} rank={i + 1} />
-          ))}
+          {dataUnavailable ? (
+            <SkeletonRows count={4} />
+          ) : (
+            openRequests.map((rfs, i) => <RFSRow key={rfs.id} rfs={rfs} rank={i + 1} />)
+          )}
         </AsciiBox>
       </div>
 
@@ -53,9 +67,11 @@ export default async function Home() {
           recently published
         </h2>
         <AsciiBox title="published">
-          {recentlyPublished.map((rfs) => (
-            <RFSRow key={rfs.id} rfs={rfs} />
-          ))}
+          {dataUnavailable ? (
+            <SkeletonRows count={4} />
+          ) : (
+            recentlyPublished.map((rfs) => <RFSRow key={rfs.id} rfs={rfs} />)
+          )}
         </AsciiBox>
       </div>
     </main>

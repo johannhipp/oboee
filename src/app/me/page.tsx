@@ -1,10 +1,11 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 import { api } from "../../../convex/_generated/api"
-import { fetchAuthQuery, isAuthenticated } from "@/lib/auth-server"
+import { fetchAuthQuery, getAuthenticationStatus, convexUnavailableMessage } from "@/lib/auth-server"
 import { CopyText } from "@/components/copy-text"
 import { AsciiBox } from "@/components/ascii-box"
 import { RFSRow } from "@/components/rfs-row"
+import { DataToast, ProfileSkeleton } from "@/components/data-fallback"
 import { baseUnitsToNumber } from "@/lib/view-models"
 
 export const dynamic = "force-dynamic"
@@ -12,7 +13,18 @@ export const dynamic = "force-dynamic"
 export const metadata: Metadata = { title: "Profile | Oboe" }
 
 export default async function ProfilePage() {
-  if (!(await isAuthenticated())) {
+  const authStatus = await getAuthenticationStatus()
+
+  if (authStatus === "unavailable") {
+    return (
+      <main className="max-w-3xl mx-auto px-4 py-8">
+        <DataToast message={convexUnavailableMessage()} />
+        <ProfileSkeleton />
+      </main>
+    )
+  }
+
+  if (authStatus === "unauthenticated") {
     return (
       <main className="max-w-3xl mx-auto px-4 py-16">
         <AsciiBox title="auth required">
@@ -27,10 +39,27 @@ export default async function ProfilePage() {
     )
   }
 
-  const dashboard = await fetchAuthQuery(api.users.getDashboard, {})
+  let dataUnavailable = false
+  let dashboard: Awaited<typeof api.users.getDashboard._returnType> | null = null
+
+  try {
+    dashboard = await fetchAuthQuery(api.users.getDashboard, {})
+  } catch {
+    dataUnavailable = true
+  }
+
+  if (!dashboard) {
+    return (
+      <main className="max-w-3xl mx-auto px-4 py-8">
+        <DataToast message={convexUnavailableMessage()} />
+        <ProfileSkeleton />
+      </main>
+    )
+  }
 
   return (
     <main className="max-w-3xl mx-auto px-4">
+      {dataUnavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
       <div className="mt-8 mb-6">
         <h1 className="text-xl font-medium tracking-tight">{dashboard.user.name}</h1>
         {dashboard.user.walletAddress ? (
@@ -53,7 +82,7 @@ export default async function ProfilePage() {
                   scope: "",
                   fundingThreshold: baseUnitsToNumber(rfs.fundingThresholdBaseUnits),
                   currentAmount: baseUnitsToNumber(rfs.currentAmountBaseUnits),
-                  status: rfs.status === "cancelled" ? "fulfilled" : rfs.status,
+                  status: rfs.status,
                   authorId: dashboard.user.id,
                   claimantId: null,
                   createdAt: new Date().toISOString(),

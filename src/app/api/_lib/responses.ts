@@ -1,6 +1,15 @@
 import { ConvexError } from "convex/values";
 
-type ResourceType = "user" | "rfs" | "skill" | "contribution" | "purchase" | "payout";
+type ResourceType =
+  | "user"
+  | "rfs"
+  | "skill"
+  | "skillVersion"
+  | "evaluation"
+  | "payoutAssessment"
+  | "contribution"
+  | "purchase"
+  | "payout";
 
 export const okWriteResponse = (
   resourceType: ResourceType,

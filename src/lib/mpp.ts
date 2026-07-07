@@ -35,6 +35,16 @@ const asHexAddress = (value: string | undefined): `0x${string}` | null => {
 
 const recipientAddress = asHexAddress(RECIPIENT_ADDRESS) ?? ZERO_ADDRESS;
 const currencyAddress = asHexAddress(CURRENCY_ADDRESS) ?? ZERO_ADDRESS;
+interface ChargeOptions {
+  amount: string;
+}
+
+type RouteHandler = (request: Request) => Response | Promise<Response>;
+
+interface PaymentClient {
+  charge: (options: ChargeOptions) => (handler: RouteHandler) => RouteHandler;
+}
+
 const createMppx = () => {
   const feePayerAccount =
     ENABLE_FEE_PAYER &&
@@ -56,16 +66,9 @@ const createMppx = () => {
   });
 };
 
-let mppxInstance: ReturnType<typeof createMppx> | null = null;
+let mppxInstance: PaymentClient | null = null;
 
 export const getMppx = () => {
   mppxInstance ??= createMppx();
   return mppxInstance;
 };
-
-type ChargeOptions = Parameters<ReturnType<typeof createMppx>["charge"]>[0];
-type RouteHandler = (request: Request) => Response | Promise<Response>;
-
-export const createChargeHandler =
-  (options: ChargeOptions) => (handler: RouteHandler) =>
-    getMppx().charge(options)(handler);
