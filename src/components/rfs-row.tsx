@@ -20,7 +20,9 @@ export function RFSRow({ rfs, rank }: RFSRowProps) {
         </span>
       )}
       <span className="flex-1 font-medium text-sm truncate min-w-0">{rfs.title}</span>
-      <StatusBadge status={rfs.status} />
+      <span className="w-28 shrink-0">
+        <StatusBadge status={rfs.status} />
+      </span>
       <span className="w-28 text-right font-mono text-xs text-muted-foreground shrink-0">
         ${rfs.currentAmount} / ${rfs.fundingThreshold}
       </span>

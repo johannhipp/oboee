@@ -9,6 +9,42 @@ const catalogStatusValidator = v.union(
   v.literal("published"),
 );
 
+const rfsStatusValidator = v.union(
+  v.literal("open"),
+  v.literal("funded"),
+  v.literal("assigned"),
+  v.literal("submitted"),
+  v.literal("evaluation_open"),
+  v.literal("accepted"),
+  v.literal("revision_requested"),
+  v.literal("disputed"),
+  v.literal("rejected"),
+  v.literal("published"),
+  v.literal("cancelled"),
+  v.literal("fulfilled"),
+);
+
+const skillStatusValidator = v.union(
+  v.literal("draft"),
+  v.literal("submitted"),
+  v.literal("evaluation_open"),
+  v.literal("accepted"),
+  v.literal("revision_requested"),
+  v.literal("disputed"),
+  v.literal("rejected"),
+  v.literal("published"),
+);
+
+const payoutAssessmentStatusValidator = v.union(
+  v.literal("pending"),
+  v.literal("claimable"),
+  v.literal("reduced"),
+  v.literal("blocked"),
+  v.literal("disputed"),
+  v.literal("manually_resolved"),
+  v.literal("claimed"),
+);
+
 const skillDocValidator = v.object({
   _id: v.id("skills"),
   _creationTime: v.number(),
@@ -18,7 +54,26 @@ const skillDocValidator = v.object({
   summary: v.string(),
   tags: v.array(v.string()),
   purchasePriceBaseUnits: v.int64(),
-  status: v.union(v.literal("draft"), v.literal("submitted"), v.literal("published")),
+  latestVersion: v.optional(v.number()),
+  latestContentHash: v.optional(v.string()),
+  status: skillStatusValidator,
+});
+
+const skillVersionSummaryValidator = v.object({
+  _id: v.id("skillVersions"),
+  version: v.number(),
+  contentHash: v.string(),
+  status: skillStatusValidator,
+  evaluationDeadline: v.number(),
+  submittedAt: v.number(),
+});
+
+const payoutAssessmentSummaryValidator = v.object({
+  _id: v.id("payoutAssessments"),
+  status: payoutAssessmentStatusValidator,
+  qualityMultiplierBps: v.number(),
+  finalPayoutBaseUnits: v.int64(),
+  assessmentReason: v.string(),
 });
 
 const rfsDocValidator = v.object({
@@ -34,13 +89,7 @@ const rfsDocValidator = v.object({
   minimumContributionBaseUnits: v.int64(),
   currentAmountBaseUnits: v.int64(),
   fundingTokenAddress: v.string(),
-  status: v.union(
-    v.literal("open"),
-    v.literal("funded"),
-    v.literal("fulfilled"),
-    v.literal("published"),
-    v.literal("cancelled"),
-  ),
+  status: rfsStatusValidator,
 });
 
 const catalogItemValidator = v.object({
@@ -85,10 +134,16 @@ export const get = query({
   returns: v.object({
     rfs: v.optional(rfsDocValidator),
     skill: v.optional(skillDocValidator),
+    latestSkillVersion: v.optional(skillVersionSummaryValidator),
+    payoutAssessment: v.optional(payoutAssessmentSummaryValidator),
+    evaluationCount: v.number(),
     canFund: v.boolean(),
     canClaim: v.boolean(),
     canBuy: v.boolean(),
     hasAccess: v.boolean(),
+    canEvaluate: v.boolean(),
+    canRevise: v.boolean(),
+    canClaimPayout: v.boolean(),
   }),
   handler: async (ctx, args) => {
     if (!args.skillId && !args.rfsId) {
@@ -124,9 +179,21 @@ export const get = query({
 
     const viewer = await authComponent.safeGetAuthUser(ctx);
     let hasAccess = false;
+    let viewerIsBacker = false;
+
+    if (viewer) {
+      const backerContribution = await ctx.db
+        .query("contributions")
+        .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
+        .collect();
+      viewerIsBacker = backerContribution.some(
+        (contribution) =>
+          contribution.status === "accepted" && contribution.backerUserId === viewer._id,
+      );
+    }
 
     if (skill && viewer) {
-      if (skill.authorUserId === viewer._id) {
+      if (skill.authorUserId === viewer._id || rfs.authorUserId === viewer._id || viewerIsBacker) {
         hasAccess = true;
       } else {
         const grant = await ctx.db
@@ -137,18 +204,86 @@ export const get = query({
       }
     }
 
+    const latestSkillVersion = skill
+      ? await ctx.db
+          .query("skillVersions")
+          .withIndex("by_skill", (q) => q.eq("skillId", skill._id))
+          .collect()
+          .then((versions) => versions.sort((a, b) => b.version - a.version)[0])
+      : undefined;
+    const payoutAssessment = await ctx.db
+      .query("payoutAssessments")
+      .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
+      .collect()
+      .then((assessments) => assessments.sort((a, b) => b._creationTime - a._creationTime)[0]);
+    const evaluationCount = latestSkillVersion
+      ? await ctx.db
+          .query("evaluationEvents")
+          .withIndex("by_skillVersionId", (q) => q.eq("skillVersionId", latestSkillVersion._id))
+          .collect()
+          .then((events) => events.length)
+      : 0;
+
+    const safeSkill =
+      skill && (skill.status === "published" || hasAccess)
+        ? skill
+        : skill
+          ? { ...skill, contentMarkdown: "" }
+          : undefined;
+
     const hasClaimant = Boolean(rfs.claimantUserId);
     const canFund = rfs.status === "open";
     const canClaim = rfs.status === "funded" && !hasClaimant;
     const canBuy = Boolean(skill && skill.status === "published" && !hasAccess);
+    const canEvaluate = Boolean(
+      viewer &&
+        latestSkillVersion &&
+        rfs.claimantUserId !== viewer._id &&
+        (rfs.authorUserId === viewer._id || viewerIsBacker) &&
+        (rfs.status === "evaluation_open" || rfs.status === "disputed"),
+    );
+    const canRevise = Boolean(viewer && rfs.claimantUserId === viewer._id && rfs.status === "revision_requested");
+    const canClaimPayout = Boolean(
+      viewer &&
+        rfs.claimantUserId === viewer._id &&
+        rfs.status === "published" &&
+        payoutAssessment &&
+        (payoutAssessment.status === "claimable" ||
+          payoutAssessment.status === "reduced" ||
+          payoutAssessment.status === "manually_resolved") &&
+        payoutAssessment.finalPayoutBaseUnits > BigInt(0),
+    );
 
     return {
       rfs,
-      skill,
+      skill: safeSkill,
+      latestSkillVersion: latestSkillVersion
+        ? {
+            _id: latestSkillVersion._id,
+            version: latestSkillVersion.version,
+            contentHash: latestSkillVersion.contentHash,
+            status: latestSkillVersion.status,
+            evaluationDeadline: latestSkillVersion.evaluationDeadline,
+            submittedAt: latestSkillVersion.submittedAt,
+          }
+        : undefined,
+      payoutAssessment: payoutAssessment
+        ? {
+            _id: payoutAssessment._id,
+            status: payoutAssessment.status,
+            qualityMultiplierBps: payoutAssessment.qualityMultiplierBps,
+            finalPayoutBaseUnits: payoutAssessment.finalPayoutBaseUnits,
+            assessmentReason: payoutAssessment.assessmentReason,
+          }
+        : undefined,
+      evaluationCount,
       canFund,
       canClaim,
       canBuy,
       hasAccess,
+      canEvaluate,
+      canRevise,
+      canClaimPayout,
     };
   },
 });
@@ -220,7 +355,7 @@ export const list = query({
 
       for (const skill of publishedSkills) {
         const rfs = await ctx.db.get(skill.rfsId);
-        if (!rfs) {
+        if (!rfs || rfs.status !== "published") {
           continue;
         }
         skillItems.push({

@@ -1,8 +1,122 @@
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 
 const MAINNET_USDC = "0x20c000000000000000000000b9537d11c60e8b50";
+
+const rfsStatusValidator = v.union(
+  v.literal("open"),
+  v.literal("funded"),
+  v.literal("assigned"),
+  v.literal("submitted"),
+  v.literal("evaluation_open"),
+  v.literal("accepted"),
+  v.literal("revision_requested"),
+  v.literal("disputed"),
+  v.literal("rejected"),
+  v.literal("published"),
+  v.literal("cancelled"),
+  v.literal("fulfilled"),
+);
+
+const stableContentHash = (parts: string[]) => {
+  let hash = BigInt("0xcbf29ce484222325");
+  const prime = BigInt("0x100000001b3");
+  const mask = BigInt("0xffffffffffffffff");
+  const input = parts.join("\u001f");
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= BigInt(input.charCodeAt(index));
+    hash = (hash * prime) & mask;
+  }
+  return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
+};
+
+const insertPublishedSkillVersion = async (
+  ctx: MutationCtx,
+  args: {
+    rfsId: Id<"rfs">;
+    authorUserId: string;
+    contentMarkdown: string;
+    summary: string;
+    tags: string[];
+    purchasePriceBaseUnits: bigint;
+    grossAmountBaseUnits: bigint;
+  },
+) => {
+  const contentHash = stableContentHash([
+    String(args.rfsId),
+    "1",
+    args.contentMarkdown,
+    args.summary,
+    args.tags.join(","),
+    args.purchasePriceBaseUnits.toString(),
+  ]);
+  const now = Date.now();
+  const platformFeeBaseUnits = args.grossAmountBaseUnits / BigInt(100);
+  const basePayoutBaseUnits = args.grossAmountBaseUnits - platformFeeBaseUnits;
+
+  const skillId = await ctx.db.insert("skills", {
+    rfsId: args.rfsId,
+    authorUserId: args.authorUserId,
+    contentMarkdown: args.contentMarkdown,
+    summary: args.summary,
+    tags: args.tags,
+    purchasePriceBaseUnits: args.purchasePriceBaseUnits,
+    latestVersion: 1,
+    latestContentHash: contentHash,
+    status: "published",
+  });
+
+  const skillVersionId = await ctx.db.insert("skillVersions", {
+    skillId,
+    rfsId: args.rfsId,
+    version: 1,
+    contentHash,
+    contentMarkdown: args.contentMarkdown,
+    summary: args.summary,
+    tags: args.tags,
+    purchasePriceBaseUnits: args.purchasePriceBaseUnits,
+    authorUserId: args.authorUserId,
+    status: "published",
+    submittedAt: now,
+    evaluationDeadline: now,
+    acceptedAt: now,
+    publishedAt: now,
+    revisionOfVersion: undefined,
+  });
+
+  await ctx.db.insert("payoutLedger", {
+    rfsId: args.rfsId,
+    researcherUserId: args.authorUserId,
+    grossAmountBaseUnits: args.grossAmountBaseUnits,
+    platformFeeBaseUnits,
+    netAmountBaseUnits: basePayoutBaseUnits,
+    status: "claimable",
+    receiptReference: undefined,
+  });
+
+  await ctx.db.insert("payoutAssessments", {
+    rfsId: args.rfsId,
+    skillId,
+    skillVersionId,
+    skillVersion: 1,
+    authorUserId: args.authorUserId,
+    grossAmountBaseUnits: args.grossAmountBaseUnits,
+    basePayoutBaseUnits,
+    qualityMultiplierBps: 10_000,
+    finalPayoutBaseUnits: basePayoutBaseUnits,
+    platformFeeBaseUnits,
+    unreleasedAmountBaseUnits: BigInt(0),
+    status: "claimable",
+    assessmentReason: "Seeded published skill treated as accepted first-pass work.",
+    evaluationWindowOpenedAt: now,
+    evaluationWindowClosedAt: now,
+    resolvedAt: now,
+  });
+
+  return skillId;
+};
 
 export const seedCveDataset = mutation({
   args: {},
@@ -90,7 +204,7 @@ export const seedCveDataset = mutation({
       });
 
       if (def.status === "published") {
-        await ctx.db.insert("skills", {
+        await insertPublishedSkillVersion(ctx, {
           rfsId,
           authorUserId: "seed:researcher:redteam",
           contentMarkdown:
@@ -98,17 +212,14 @@ export const seedCveDataset = mutation({
           summary: "CVE chain containment baseline for MVP testing.",
           tags: def.tags,
           purchasePriceBaseUnits: BigInt(5_000),
-          status: "published",
+          grossAmountBaseUnits: def.currentAmountBaseUnits,
         });
       }
 
       createdRfsIds.push(rfsId);
     }
 
-    return {
-      createdRfsIds,
-      reusedRfsIds,
-    };
+    return { createdRfsIds, reusedRfsIds };
   },
 });
 
@@ -118,13 +229,7 @@ export const listSeededRfs = query({
     v.object({
       id: v.id("rfs"),
       title: v.string(),
-      status: v.union(
-        v.literal("open"),
-        v.literal("funded"),
-        v.literal("fulfilled"),
-        v.literal("published"),
-        v.literal("cancelled"),
-      ),
+      status: rfsStatusValidator,
       currentAmountBaseUnits: v.int64(),
       fundingThresholdBaseUnits: v.int64(),
     }),
@@ -173,30 +278,26 @@ export const publishFundedSeedRfs = mutation({
       if (rfs.status !== "published") {
         await ctx.db.patch(rfs._id, { status: "published" });
       }
-      return {
-        rfsId: rfs._id,
-        skillId: existingSkill._id,
-        status: "published" as const,
-      };
+      return { rfsId: rfs._id, skillId: existingSkill._id, status: "published" as const };
     }
 
-    const skillId = await ctx.db.insert("skills", {
+    const contentMarkdown =
+      "# CVE-2023-44487 linked response playbook\n\n## Goal\nStabilize edge and origin during Rapid Reset abuse while preserving forensic visibility.\n\n## Steps\n1. Enable per-connection stream reset thresholds.\n2. Gate expensive origin paths behind adaptive concurrency limits.\n3. Emit challenge-id linked logs at edge and origin for replay analysis.\n4. Roll staged ruleset updates with rollback guardrails.\n";
+    const skillId = await insertPublishedSkillVersion(ctx, {
       rfsId: rfs._id,
       authorUserId: "seed:researcher:redteam",
-      contentMarkdown:
-        "# CVE-2023-44487 linked response playbook\n\n## Goal\nStabilize edge and origin during Rapid Reset abuse while preserving forensic visibility.\n\n## Steps\n1. Enable per-connection stream reset thresholds.\n2. Gate expensive origin paths behind adaptive concurrency limits.\n3. Emit challenge-id linked logs at edge and origin for replay analysis.\n4. Roll staged ruleset updates with rollback guardrails.\n",
+      contentMarkdown,
       summary: "Published CVE-linked response skill after successful funding.",
       tags: ["cve-2023-44487", "http2", "dos", "gateway"],
       purchasePriceBaseUnits: BigInt(5_000),
+      grossAmountBaseUnits: rfs.currentAmountBaseUnits,
+    });
+
+    await ctx.db.patch(rfs._id, {
+      claimantUserId: "seed:researcher:redteam",
       status: "published",
     });
 
-    await ctx.db.patch(rfs._id, { status: "published" });
-
-    return {
-      rfsId: rfs._id,
-      skillId,
-      status: "published" as const,
-    };
+    return { rfsId: rfs._id, skillId, status: "published" as const };
   },
 });

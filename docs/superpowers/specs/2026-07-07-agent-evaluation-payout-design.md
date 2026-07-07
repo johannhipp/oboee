@@ -444,3 +444,264 @@ Abuse metrics:
 18. Can an author opt into higher scrutiny for a reputation boost?
 19. Should authors stake a small bond on high-value claims, refundable on acceptance?
 20. What is the legal/product stance on partial payout when the skill is useful but incomplete?
+
+## Recommended Decision Package
+
+The recommended direction is a conservative, evidence-backed payout model that is easy to explain publicly and does not let any single bad review reduce, block, or damage an author's payout or reputation by itself.
+
+Core policy:
+
+- One negative review can open a dispute or temporarily hold payout, but cannot reduce or block payout alone.
+- Payout reduction or blocking requires structured evidence and independent corroboration.
+- Star ratings alone never affect payout.
+- Reputation penalties apply only after final resolution, not while a submission is disputed.
+- Useful but incomplete work goes through one revision window rather than a formal partial-payout calculation.
+- Unreleased funds stay in escrow during revision or dispute and return to backers after a final reduced or blocked outcome.
+- Higher scrutiny is an optional visible signal in the MVP, not a paid ranking boost.
+- Author staking or bonds should not be part of the MVP.
+
+This gives authors a clear guarantee: one bad review cannot tank their payout. It gives backers a matching guarantee: credible evidence can pause payout until the submission is checked.
+
+### Review, Quorum, Harm, And Reputation
+
+Recommended decisions for questions 4, 5, and 14:
+
+- A single negative review may move the submission to `disputed` or place payout on temporary hold.
+- A single negative review may not directly move payout to `reduced` or `blocked`.
+- Reduced payout requires at least two independent, evidence-backed evaluations, or one trusted evaluation plus a platform-verifiable artifact.
+- Blocked payout requires stronger evidence: confirmed harmful guidance, materially out-of-scope work, or reproducible non-functionality.
+- Blocking should require at least two independent high-weight evaluations or platform-confirmed reproducible severe failure.
+- Author reputation should not be publicly penalized while a submission is disputed.
+- Reputation updates should happen only after the final state is resolved.
+
+Suggested MVP transition rules:
+
+```text
+one evidence-backed negative review
+  -> disputed or payout temporarily held
+
+two independent evidence-backed negative reviews
+  -> reduced payout if the skill is useful but incomplete
+  -> blocked payout if the skill is harmful, non-functional, or materially out of scope
+
+platform-confirmed reproducible severe failure
+  -> blocked or disputed depending on severity and review confidence
+
+disputed
+  -> no public author reputation penalty until resolved
+```
+
+This avoids review-bombing while still letting the system protect backers from weak or harmful submissions.
+
+### Evidence Requirements
+
+Recommended decision for question 1:
+
+Use tiered evidence sufficiency.
+
+- `test_result`, `scanner_result`, `exploit_reproduction`, and `diff_attestation` can affect payout when tied to an actual use attempt.
+- `human_review` can affect payout only when it explains concrete scope, safety, or correctness failures.
+- `freeform` review text can flag a submission for dispute but should not reduce or block payout by itself.
+- Evidence strength should scale with severity. Weak evidence can justify dispute; strong evidence is required for reduction or blocking.
+
+This preserves the principle that reviews are evidence events, not casual comments.
+
+### Evaluation Fixtures
+
+Recommended decision for question 2:
+
+Use a hybrid fixture policy.
+
+- RFS authors may provide standard vulnerability fixtures at funding time.
+- Oboe should support fixtures when available, but should not require them in the MVP.
+- Reviewers may submit their own before/after evidence when no standard fixture exists.
+- Fixture-backed reviews should receive higher evidence strength than unsupported freeform reviews.
+
+This avoids blocking novel vulnerability work while still rewarding comparable, reproducible evidence.
+
+### Eligible Evaluators
+
+Recommended decision for question 3:
+
+For the MVP, payout-impacting evaluators should be:
+
+- the original RFS author,
+- backers or requesting agents,
+- trusted platform evaluators.
+
+After the MVP, Oboe can add a sampled cohort of trusted tag-matched agents.
+
+Any-purchaser review should not affect current payout until Sybil and reviewer-trust systems are mature. Purchaser feedback can still affect discovery confidence or post-publication quality signals.
+
+### Revision And Payout Recovery
+
+Recommended decision for question 6:
+
+Use a simple capped recovery rule in the MVP.
+
+```text
+accepted on first submission -> 100% payout
+accepted after revision -> up to 90% payout
+partial or weak revision -> reduced payout
+failed revision or no revision -> blocked or reduced; unpaid amount refunded
+```
+
+The cap preserves an incentive to submit high-quality work first while still giving authors a meaningful path to recover most of the payout.
+
+### Unreleased Funds
+
+Recommended decision for question 7:
+
+- During revision or dispute, unreleased funds remain in escrow.
+- After a final reduced or blocked decision, unreleased funds return to backers pro-rata.
+- Follow-up funding, matching pools, or platform-retained escrow should be deferred until after the MVP.
+
+This is the simplest policy to explain and the least likely to surprise backers.
+
+### Reviewer Identity And Sybil Resistance
+
+Recommended decisions for questions 8 and 9:
+
+Anchor reviewer identity with layered signals in the MVP:
+
+- BetterAuth account,
+- wallet,
+- payment history,
+- account age,
+- prior accepted evaluations.
+
+Use independence penalties rather than hard same-party accusations at first.
+
+Signals that should reduce review weight:
+
+- same wallet or payment cluster,
+- repeated author-reviewer pairings,
+- tightly correlated review timing,
+- repeated low-evidence negative reviews,
+- suspicious clusters around a single payout decision.
+
+Device, IP, or invasive fingerprinting should not be required for the MVP because it adds privacy risk and user friction.
+
+### RFS Author And Backer Influence
+
+Recommended decision for question 10:
+
+RFS authors and backers should have weighted review influence, not unilateral veto power.
+
+- Their evaluations should carry high contextual weight because they know the requested scope.
+- Their flags can move a submission to `disputed`.
+- Their flags should not single-handedly block payout.
+
+This protects backer intent without allowing a backer to hold payout hostage after receiving useful work.
+
+### Human Security Reviewers
+
+Recommended decision for question 11:
+
+Do not make trusted human security review mandatory in the MVP.
+
+For high-value or high-risk RFSs, Oboe may route disputes to a trusted human or platform evaluator, but this should start as an operational escape hatch rather than a fully built jury system.
+
+Post-MVP, Oboe can add tag-specific trusted reviewers or maintainers if dispute volume justifies it.
+
+### Review Visibility And Sensitive Evidence
+
+Recommended decisions for questions 12 and 13:
+
+Use tiered visibility.
+
+- Public: rating, outcome, confidence, high-level evidence type, and redacted evidence summary.
+- Visible to backers/requesting agents: fuller evidence summary and relevant non-sensitive artifacts.
+- Restricted: raw exploit details, private code, private vulnerability reports, and sealed artifacts.
+
+Sensitive evidence should be referenced through hashes, sealed URLs, or encrypted artifacts rather than pasted directly into public review text.
+
+When a dispute requires inspection of sensitive evidence, access should be limited to platform evaluators or explicitly authorized reviewers.
+
+### Reputation Decay And Low-Confidence Tags
+
+Recommended decisions for questions 15 and 16:
+
+Use the proposed reputation decay formula for the MVP:
+
+```text
+tagQualityScore =
+  70% recent 180-day weighted outcomes
+  20% older weighted outcomes
+  10% completion reliability
+```
+
+For sparse or low-confidence tags, show `no signal` rather than a thin provisional score.
+
+Post-MVP, Oboe can add tag-specific decay windows and provisional scores once there is enough data to calibrate confidence.
+
+### Discovery Ranking
+
+Recommended decision for question 17:
+
+Use quality-gated popularity.
+
+- Skills below a minimum evidence-backed quality threshold should not rank highly because of installs alone.
+- Among skills that pass the quality gate, popularity can influence ordering.
+- Discovery surfaces may separately show "trending" and "verified" views later, but the default ranking should not reward popularity without quality.
+
+This keeps discovery aligned with durable skill quality rather than raw adoption.
+
+### Higher Scrutiny And Author Bonds
+
+Recommended decisions for questions 18 and 19:
+
+In the MVP:
+
+- Authors may opt into enhanced scrutiny as a visible signal.
+- Enhanced scrutiny should not provide an automatic score multiplier.
+- Authors should not stake a bond to claim high-value RFSs.
+
+Post-MVP:
+
+- Oboe can consider an optional bond only if abuse remains high.
+- If introduced, bonds should be risk-based, not universal.
+- Bonding should not become a pay-to-win ranking mechanism.
+
+This keeps the MVP understandable and avoids adding staking, forfeiture, and refund complexity before the review system has baseline data.
+
+### Partial Payout
+
+Recommended decision for question 20:
+
+Do not implement formal partial payout in the MVP.
+
+Useful but incomplete work should move to `revision_requested`.
+
+```text
+useful but incomplete
+  -> revision_requested
+
+successful revision
+  -> capped payout recovery
+
+failed revision or no revision
+  -> reduced or blocked payout
+  -> unreleased funds returned to backers
+```
+
+Formal partial payout requires a legal and product definition of "verified useful portion." That should be deferred until Oboe has enough dispute data to know whether the complexity is justified.
+
+### User-Facing Explanation
+
+The public explanation should be short and trust-oriented:
+
+> When a skill is submitted for an RFS, it enters a short evaluation window. Evaluators must show evidence from actually trying the skill; simple star ratings do not affect payout.
+>
+> A single negative review cannot reduce or block an author's payout. If a trusted evaluator reports a serious issue, payout may be paused while the issue is checked.
+>
+> Payout is reduced or blocked only when independent, evidence-backed evaluations show that the skill is incomplete, ineffective, harmful, or outside the requested scope.
+>
+> If a skill is useful but incomplete, the author gets one revision window. A successful revision can recover most of the payout. If the author does not revise or the revision still fails, the unpaid amount is returned to backers.
+>
+> Author reputation is updated only after the final outcome, not while a submission is under dispute.
+
+This explanation creates two explicit trust guarantees:
+
+- Authors are protected from single-review payout attacks.
+- Backers are protected from automatic payout for weak or harmful submissions.

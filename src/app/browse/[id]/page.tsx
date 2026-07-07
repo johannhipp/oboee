@@ -59,14 +59,15 @@ export default async function Page({
   const skill = detail.skill
   const currentAmount = baseUnitsToNumber(rfs.currentAmountBaseUnits)
   const fundingThreshold = baseUnitsToNumber(rfs.fundingThresholdBaseUnits)
-  const displayStatus = rfs.status === "cancelled" ? "fulfilled" : rfs.status
+  const latestSkillVersion = detail.latestSkillVersion
+  const payoutAssessment = detail.payoutAssessment
 
   return (
     <div className="flex flex-col lg:flex-row gap-8 my-8">
       <div className="flex-1 min-w-0">
         <h1 className="text-2xl font-medium tracking-tight break-words">{rfs.title}</h1>
         <div className="mt-2">
-          <StatusBadge status={displayStatus} />
+          <StatusBadge status={rfs.status} />
         </div>
         <div className="text-sm font-mono mt-1 flex items-center gap-1">
           <span className="text-muted-foreground">by</span>
@@ -78,17 +79,50 @@ export default async function Page({
           <p className="text-sm leading-relaxed mt-2 break-words">{rfs.description}</p>
         </AsciiBox>
 
-        {(rfs.status === "published" || rfs.status === "fulfilled") &&
-          skill && (
-            <AsciiBox title="skill preview" className="mt-6">
-              <p className="text-sm leading-relaxed break-words">
-                {skill.contentMarkdown.slice(0, 200)}...
+        {latestSkillVersion ? (
+          <AsciiBox title="evaluation" className="mt-6">
+            <div className="space-y-2 text-sm leading-relaxed">
+              <p className="font-mono text-xs text-muted-foreground">
+                version {latestSkillVersion.version} · {latestSkillVersion.contentHash}
               </p>
-              <p className="text-xs text-muted-foreground mt-2 font-mono">
-                buy to read full skill
+              <div className="flex items-center gap-2">
+                <StatusBadge status={latestSkillVersion.status} />
+                {payoutAssessment ? <StatusBadge status={payoutAssessment.status} /> : null}
+              </div>
+              <p className="text-xs font-mono text-muted-foreground">
+                {detail.evaluationCount} evaluation{detail.evaluationCount === 1 ? "" : "s"} submitted · window closes{" "}
+                {new Date(latestSkillVersion.evaluationDeadline).toLocaleString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
               </p>
-            </AsciiBox>
-          )}
+              {payoutAssessment ? (
+                <p className="text-xs text-muted-foreground">{payoutAssessment.assessmentReason}</p>
+              ) : null}
+            </div>
+          </AsciiBox>
+        ) : null}
+
+        {skill && skill.contentMarkdown ? (
+          <AsciiBox title="skill preview" className="mt-6">
+            <p className="text-sm leading-relaxed break-words">
+              {skill.contentMarkdown.slice(0, 200)}...
+            </p>
+            <p className="text-xs text-muted-foreground mt-2 font-mono">
+              {rfs.status === "published" ? "buy to read full skill" : "visible to eligible evaluators"}
+            </p>
+          </AsciiBox>
+        ) : null}
+
+        <AsciiBox title="evaluation policy" className="mt-6">
+          <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
+            <p>Evaluators must submit evidence from actually trying the skill. Star ratings alone do not affect payout.</p>
+            <p>A single negative review can open a dispute or hold payout, but cannot reduce or block payout by itself.</p>
+            <p>Reduced or blocked payout requires independent, evidence-backed corroboration. Reputation updates only after final resolution.</p>
+          </div>
+        </AsciiBox>
       </div>
 
       <div className="lg:w-72 lg:shrink-0 lg:sticky lg:top-20 lg:self-start">
@@ -109,12 +143,27 @@ export default async function Page({
 
           <RfsActions
             rfsId={rfs._id}
-            status={displayStatus}
+            status={rfs.status}
             canFund={detail.canFund}
             canClaim={detail.canClaim}
             canBuy={detail.canBuy}
+            canEvaluate={detail.canEvaluate}
+            canRevise={detail.canRevise}
+            canClaimPayout={detail.canClaimPayout}
             skillId={skill?._id}
             hasSkill={Boolean(skill)}
+            latestSkillVersion={
+              latestSkillVersion
+                ? {
+                    id: latestSkillVersion._id,
+                    version: latestSkillVersion.version,
+                    contentHash: latestSkillVersion.contentHash,
+                    status: latestSkillVersion.status,
+                    evaluationDeadline: latestSkillVersion.evaluationDeadline,
+                  }
+                : undefined
+            }
+            payoutAssessment={payoutAssessment}
           />
 
           <div className="mt-4 border-t border-border pt-3">

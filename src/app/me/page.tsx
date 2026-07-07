@@ -53,7 +53,7 @@ export default async function ProfilePage() {
                   scope: "",
                   fundingThreshold: baseUnitsToNumber(rfs.fundingThresholdBaseUnits),
                   currentAmount: baseUnitsToNumber(rfs.currentAmountBaseUnits),
-                  status: rfs.status === "cancelled" ? "fulfilled" : rfs.status,
+                  status: rfs.status,
                   authorId: dashboard.user.id,
                   claimantId: null,
                   createdAt: new Date().toISOString(),

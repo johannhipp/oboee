@@ -3,6 +3,17 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
 
+const skillStatusValidator = v.union(
+  v.literal("draft"),
+  v.literal("submitted"),
+  v.literal("evaluation_open"),
+  v.literal("accepted"),
+  v.literal("revision_requested"),
+  v.literal("disputed"),
+  v.literal("rejected"),
+  v.literal("published"),
+);
+
 const skillDocValidator = v.object({
   _id: v.id("skills"),
   _creationTime: v.number(),
@@ -12,7 +23,9 @@ const skillDocValidator = v.object({
   summary: v.string(),
   tags: v.array(v.string()),
   purchasePriceBaseUnits: v.int64(),
-  status: v.union(v.literal("draft"), v.literal("submitted"), v.literal("published")),
+  latestVersion: v.optional(v.number()),
+  latestContentHash: v.optional(v.string()),
+  status: skillStatusValidator,
 });
 
 const computeFeeSplit = (grossAmountBaseUnits: bigint) => {
@@ -120,20 +133,60 @@ export const checkAccess = query({
   returns: v.object({
     hasAccess: v.boolean(),
     skill: v.union(skillDocValidator, v.null()),
+    skillVersion: v.union(
+      v.object({
+        version: v.number(),
+        contentHash: v.string(),
+        evaluationDeadline: v.number(),
+      }),
+      v.null(),
+    ),
   }),
   handler: async (ctx, args) => {
     const skill = await ctx.db.get(args.skillId);
     if (!skill) {
-      return { hasAccess: false, skill: null };
+      return { hasAccess: false, skill: null, skillVersion: null };
     }
+
+    const versions = await ctx.db
+      .query("skillVersions")
+      .withIndex("by_skill", (q) => q.eq("skillId", skill._id))
+      .collect();
+    const latestVersion = versions.sort((a, b) => b.version - a.version)[0];
+    const skillVersion = latestVersion
+      ? {
+          version: latestVersion.version,
+          contentHash: latestVersion.contentHash,
+          evaluationDeadline: latestVersion.evaluationDeadline,
+        }
+      : null;
 
     const viewer = await authComponent.safeGetAuthUser(ctx);
     if (!viewer) {
-      return { hasAccess: false, skill };
+      return { hasAccess: false, skill, skillVersion };
     }
 
     if (skill.authorUserId === viewer._id) {
-      return { hasAccess: true, skill };
+      return { hasAccess: true, skill, skillVersion };
+    }
+
+    const rfs = await ctx.db.get(skill.rfsId);
+    if (rfs?.authorUserId === viewer._id) {
+      return { hasAccess: true, skill, skillVersion };
+    }
+
+    if (rfs) {
+      const contributions = await ctx.db
+        .query("contributions")
+        .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
+        .collect();
+      const viewerIsBacker = contributions.some(
+        (contribution) =>
+          contribution.status === "accepted" && contribution.backerUserId === viewer._id,
+      );
+      if (viewerIsBacker && (rfs.status === "evaluation_open" || rfs.status === "disputed" || rfs.status === "published")) {
+        return { hasAccess: true, skill, skillVersion };
+      }
     }
 
     const grant = await ctx.db
@@ -144,6 +197,7 @@ export const checkAccess = query({
     return {
       hasAccess: Boolean(grant),
       skill,
+      skillVersion,
     };
   },
 });

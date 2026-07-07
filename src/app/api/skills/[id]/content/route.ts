@@ -34,6 +34,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         nextState: access.skill.status,
         accessGranted: true,
         contentMarkdown: access.skill.contentMarkdown,
+        skillVersion: access.skillVersion?.version,
+        contentHash: access.skillVersion?.contentHash,
+        evaluationDeadline: access.skillVersion?.evaluationDeadline,
       });
     }
 
@@ -101,6 +104,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         purchaseId: purchase.purchaseId,
         receiptReference: payloadReceiptReference ?? credential.challenge.id,
         contentMarkdown: refreshed.skill.contentMarkdown,
+        skillVersion: refreshed.skillVersion?.version,
+        contentHash: refreshed.skillVersion?.contentHash,
+        evaluationDeadline: refreshed.skillVersion?.evaluationDeadline,
       });
     });
 
