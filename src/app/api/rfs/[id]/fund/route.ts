@@ -4,7 +4,7 @@ import { fetchMutation, fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../../convex/_generated/api";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { errorResponse, errorResponseFrom, okWriteResponse } from "@/app/api/_lib/responses";
-import { mppx } from "@/lib/mpp";
+import { getMppx } from "@/lib/mpp";
 
 const MPP_DECIMALS = 6;
 const AMOUNT_DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
@@ -59,7 +59,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       );
     }
 
-    const paidHandler = mppx.charge({ amount: body.amount })(async (paidRequest: Request) => {
+    const paidHandler = getMppx().charge({ amount: body.amount })(async (paidRequest: Request) => {
       const credential = Credential.fromRequest(paidRequest);
       const challengeRequest = credential.challenge.request as {
         amount?: unknown;

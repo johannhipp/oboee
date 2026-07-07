@@ -5,6 +5,8 @@ import { api } from "../../../convex/_generated/api"
 import { RFSRow } from "@/components/rfs-row"
 import { toRfsViewModel } from "@/lib/view-models"
 
+export const dynamic = "force-dynamic"
+
 export const metadata: Metadata = { title: "Browse | Oboe" }
 
 const statusOrder = ["open", "funded", "fulfilled", "published"] as const

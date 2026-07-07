@@ -9,6 +9,8 @@ import { RfsActions } from "@/components/rfs-actions"
 import { CopyId } from "@/components/copy-id"
 import { baseUnitsToNumber } from "@/lib/view-models"
 
+export const dynamic = "force-dynamic"
+
 export async function generateMetadata({
   params,
 }: {

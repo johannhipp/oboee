@@ -3,6 +3,8 @@ import { redirect } from "next/navigation"
 import { SignInForm } from "@/components/sign-in-form"
 import { isAuthenticated } from "@/lib/auth-server"
 
+export const dynamic = "force-dynamic"
+
 export const metadata: Metadata = { title: "Sign In | Oboe" }
 
 export default async function SignInPage() {

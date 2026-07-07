@@ -6,6 +6,8 @@ import { AsciiBox } from "@/components/ascii-box"
 import { CopyBox } from "@/components/copy-box"
 import { toRfsViewModel } from "@/lib/view-models"
 
+export const dynamic = "force-dynamic"
+
 export default async function Home() {
   const [openRows, publishedRows] = await Promise.all([
     fetchQuery(api.rfs.list, { status: "open" }),
