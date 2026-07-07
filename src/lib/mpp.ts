@@ -35,28 +35,37 @@ const asHexAddress = (value: string | undefined): `0x${string}` | null => {
 
 const recipientAddress = asHexAddress(RECIPIENT_ADDRESS) ?? ZERO_ADDRESS;
 const currencyAddress = asHexAddress(CURRENCY_ADDRESS) ?? ZERO_ADDRESS;
-const feePayerAccount =
-  ENABLE_FEE_PAYER &&
-  typeof FEE_PAYER_PRIVATE_KEY === "string" &&
-  hexPrivateKeyPattern.test(FEE_PAYER_PRIVATE_KEY)
-    ? privateKeyToAccount(FEE_PAYER_PRIVATE_KEY as `0x${string}`)
-    : undefined;
+const createMppx = () => {
+  const feePayerAccount =
+    ENABLE_FEE_PAYER &&
+    typeof FEE_PAYER_PRIVATE_KEY === "string" &&
+    hexPrivateKeyPattern.test(FEE_PAYER_PRIVATE_KEY)
+      ? privateKeyToAccount(FEE_PAYER_PRIVATE_KEY as `0x${string}`)
+      : undefined;
 
-export const mppx = Mppx.create({
-  methods: [
-    tempo({
-      currency: currencyAddress,
-      recipient: recipientAddress,
-      ...(feePayerAccount ? { feePayer: feePayerAccount } : {}),
-      // MIGRATION: uncomment for mainnet fee sponsorship
-      // feePayer: privateKeyToAccount('0x...'),
-    }),
-  ],
-});
+  return Mppx.create({
+    methods: [
+      tempo({
+        currency: currencyAddress,
+        recipient: recipientAddress,
+        ...(feePayerAccount ? { feePayer: feePayerAccount } : {}),
+        // MIGRATION: uncomment for mainnet fee sponsorship
+        // feePayer: privateKeyToAccount('0x...'),
+      }),
+    ],
+  });
+};
 
-type ChargeOptions = Parameters<typeof mppx.charge>[0];
+let mppxInstance: ReturnType<typeof createMppx> | null = null;
+
+export const getMppx = () => {
+  mppxInstance ??= createMppx();
+  return mppxInstance;
+};
+
+type ChargeOptions = Parameters<ReturnType<typeof createMppx>["charge"]>[0];
 type RouteHandler = (request: Request) => Response | Promise<Response>;
 
 export const createChargeHandler =
   (options: ChargeOptions) => (handler: RouteHandler) =>
-    mppx.charge(options)(handler);
+    getMppx().charge(options)(handler);

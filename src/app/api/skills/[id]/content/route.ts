@@ -4,7 +4,7 @@ import { fetchMutation, fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../../convex/_generated/api";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { errorResponse, errorResponseFrom } from "@/app/api/_lib/responses";
-import { mppx } from "@/lib/mpp";
+import { getMppx } from "@/lib/mpp";
 
 const MPP_DECIMALS = 6;
 const MAX_TEST_AMOUNT_BASE_UNITS = BigInt(9_000);
@@ -46,7 +46,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         ? MAX_TEST_AMOUNT_BASE_UNITS
         : access.skill.purchasePriceBaseUnits,
     );
-    const paidHandler = mppx.charge({ amount: chargeAmount })(async (paidRequest: Request) => {
+    const paidHandler = getMppx().charge({ amount: chargeAmount })(async (paidRequest: Request) => {
       const credential = Credential.fromRequest(paidRequest);
       const challengeRequest = credential.challenge.request as {
         amount?: unknown;

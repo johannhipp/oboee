@@ -7,6 +7,8 @@ import { AsciiBox } from "@/components/ascii-box"
 import { RFSRow } from "@/components/rfs-row"
 import { baseUnitsToNumber } from "@/lib/view-models"
 
+export const dynamic = "force-dynamic"
+
 export const metadata: Metadata = { title: "Profile | Oboe" }
 
 export default async function ProfilePage() {
