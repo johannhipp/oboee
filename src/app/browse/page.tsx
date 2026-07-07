@@ -3,7 +3,9 @@ import Link from "next/link"
 import { fetchQuery } from "convex/nextjs"
 import { api } from "../../../convex/_generated/api"
 import { RFSRow } from "@/components/rfs-row"
+import { DataToast, SkeletonRows } from "@/components/data-fallback"
 import { toRfsViewModel } from "@/lib/view-models"
+import { convexUnavailableMessage } from "@/lib/auth-server"
 
 export const dynamic = "force-dynamic"
 
@@ -32,8 +34,15 @@ export default async function BrowsePage({
   const params = await searchParams
   const status = isStatus(params.status) ? params.status : undefined
   const q = params.q?.trim().toLowerCase() ?? ""
+  let dataUnavailable = false
+  let rows: Awaited<typeof api.rfs.list._returnType> = []
 
-  const rows = await fetchQuery(api.rfs.list, { status })
+  try {
+    rows = await fetchQuery(api.rfs.list, { status })
+  } catch {
+    dataUnavailable = true
+  }
+
   const filtered = rows.filter((rfs) => {
     if (!q) {
       return true
@@ -71,6 +80,7 @@ export default async function BrowsePage({
   return (
     <section>
       <h1 className="text-xl font-medium tracking-tight mb-6 mt-8">Browse</h1>
+      {dataUnavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
 
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         {pills.map((pill) => (
@@ -106,9 +116,11 @@ export default async function BrowsePage({
         <span className="w-24">author</span>
       </div>
 
-      {sortedRfs.map((rfs, i) => (
-        <RFSRow key={rfs.id} rfs={rfs} rank={i + 1} />
-      ))}
+      {dataUnavailable ? (
+        <SkeletonRows count={6} />
+      ) : (
+        sortedRfs.map((rfs, i) => <RFSRow key={rfs.id} rfs={rfs} rank={i + 1} />)
+      )}
     </section>
   )
 }

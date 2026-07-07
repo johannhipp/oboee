@@ -1,18 +1,38 @@
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 import { NewRfsForm } from "@/components/new-rfs-form"
-import { isAuthenticated } from "@/lib/auth-server"
+import { AsciiBox } from "@/components/ascii-box"
+import { DataToast } from "@/components/data-fallback"
+import { convexUnavailableMessage, getAuthenticationStatus } from "@/lib/auth-server"
 
 export const dynamic = "force-dynamic"
 
 export const metadata: Metadata = { title: "New request | Oboe" }
 
 export default async function NewRequestPage() {
-  if (!(await isAuthenticated())) {
+  const authStatus = await getAuthenticationStatus()
+
+  if (authStatus === "unavailable") {
+    return (
+      <main className="max-w-3xl mx-auto px-4 py-8">
+        <DataToast message={convexUnavailableMessage()} />
+        <AsciiBox title="new request">
+          <div className="space-y-4">
+            <div className="h-4 w-2/3 rounded-sm bg-gray-100" />
+            <div className="h-24 w-full rounded-md bg-gray-100" />
+            <div className="h-10 w-full rounded-md bg-gray-100" />
+            <p className="font-mono text-xs text-muted-foreground">
+              Request creation needs auth and Convex writes, so the form is unavailable until the backend is configured.
+            </p>
+          </div>
+        </AsciiBox>
+      </main>
+    )
+  }
+
+  if (authStatus === "unauthenticated") {
     redirect("/sign-in?next=%2Fnew")
   }
 
-  return (
-    <NewRfsForm />
-  )
+  return <NewRfsForm />
 }
