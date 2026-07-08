@@ -530,6 +530,13 @@ export const closeEvaluation = mutation({
     }
     await assertCanViewEvaluation(ctx, rfs, userId);
 
+    if (args.force === true && userId !== rfs.authorUserId) {
+      throw new ConvexError({
+        code: "FORBIDDEN",
+        message: "Only the RFS author can force close the evaluation window.",
+      });
+    }
+
     if (rfs.status !== "evaluation_open" && rfs.status !== "disputed") {
       throw new ConvexError({ code: "INVALID_STATE", message: "Evaluation is not open." });
     }
@@ -639,7 +646,22 @@ export const openDispute = mutation({
       throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
     }
     await assertCanViewEvaluation(ctx, rfs, userId);
+
+    if (rfs.status !== "evaluation_open" && rfs.status !== "disputed") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Dispute can only be opened while the evaluation window is open.",
+      });
+    }
+
     const assessment = await getLatestAssessmentOrThrow(ctx, rfs._id);
+    if (assessment.status === "claimed" || assessment.evaluationWindowClosedAt !== undefined) {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Dispute cannot be opened after the evaluation has been finalized or claimed.",
+      });
+    }
+
     const reason = args.reason.trim();
     if (!reason) {
       throw new ConvexError({ code: "INVALID_REASON", message: "Dispute reason is required." });
