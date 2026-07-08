@@ -2,35 +2,10 @@ import { v } from "convex/values";
 
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import { stableContentHash } from "./lib/helpers";
+import { rfsStatusValidator } from "./lib/validators";
 
 const MAINNET_USDC = "0x20c000000000000000000000b9537d11c60e8b50";
-
-const rfsStatusValidator = v.union(
-  v.literal("open"),
-  v.literal("funded"),
-  v.literal("assigned"),
-  v.literal("submitted"),
-  v.literal("evaluation_open"),
-  v.literal("accepted"),
-  v.literal("revision_requested"),
-  v.literal("disputed"),
-  v.literal("rejected"),
-  v.literal("published"),
-  v.literal("cancelled"),
-  v.literal("fulfilled"),
-);
-
-const stableContentHash = (parts: string[]) => {
-  let hash = BigInt("0xcbf29ce484222325");
-  const prime = BigInt("0x100000001b3");
-  const mask = BigInt("0xffffffffffffffff");
-  const input = parts.join("\u001f");
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= BigInt(input.charCodeAt(index));
-    hash = (hash * prime) & mask;
-  }
-  return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
-};
 
 const insertPublishedSkillVersion = async (
   ctx: MutationCtx,

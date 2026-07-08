@@ -2,7 +2,13 @@ import { ConvexError, v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { authComponent } from "./auth";
+import { payoutAssessmentStatusValidator, rfsStatusValidator } from "./lib/validators";
+import {
+  getLatestAssessmentOrThrow,
+  getSkillAndLatestVersion,
+  requireAuthedUserId,
+  userBackedRfs,
+} from "./lib/helpers";
 
 const reviewerTypeValidator = v.union(
   v.literal("agent"),
@@ -28,39 +34,6 @@ const evidenceTypeValidator = v.union(
   v.literal("human_review"),
   v.literal("freeform"),
 );
-
-const rfsStatusValidator = v.union(
-  v.literal("open"),
-  v.literal("funded"),
-  v.literal("assigned"),
-  v.literal("submitted"),
-  v.literal("evaluation_open"),
-  v.literal("accepted"),
-  v.literal("revision_requested"),
-  v.literal("disputed"),
-  v.literal("rejected"),
-  v.literal("published"),
-  v.literal("cancelled"),
-  v.literal("fulfilled"),
-);
-
-const assessmentStatusValidator = v.union(
-  v.literal("pending"),
-  v.literal("claimable"),
-  v.literal("reduced"),
-  v.literal("blocked"),
-  v.literal("disputed"),
-  v.literal("manually_resolved"),
-  v.literal("claimed"),
-);
-
-const requireAuthedUserId = async (ctx: QueryCtx | MutationCtx) => {
-  const user = await authComponent.safeGetAuthUser(ctx);
-  if (!user) {
-    throw new ConvexError({ code: "UNAUTHORIZED", message: "Authentication required." });
-  }
-  return user._id;
-};
 
 const evidenceStrengthBps = (evidenceType: Doc<"evaluationEvents">["evidenceType"]) => {
   if (
@@ -92,48 +65,6 @@ const isPositiveOutcome = (outcome: Doc<"evaluationEvents">["outcome"], rating: 
 
 const isNegativeOutcome = (outcome: Doc<"evaluationEvents">["outcome"], rating: number) =>
   outcome === "harmful" || outcome === "no_effect" || outcome === "unable_to_apply" || rating <= 2;
-
-const currentSkillAndVersion = async (ctx: QueryCtx | MutationCtx, rfsId: Id<"rfs">) => {
-  const skill = await ctx.db
-    .query("skills")
-    .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
-    .first();
-  if (!skill) {
-    throw new ConvexError({ code: "NOT_FOUND", message: "Skill not found for this RFS." });
-  }
-
-  const versions = await ctx.db
-    .query("skillVersions")
-    .withIndex("by_skill", (q) => q.eq("skillId", skill._id))
-    .collect();
-  const latestVersion = versions.sort((a, b) => b.version - a.version)[0];
-  if (!latestVersion) {
-    throw new ConvexError({ code: "NOT_FOUND", message: "Skill version not found for this RFS." });
-  }
-  return { skill, latestVersion };
-};
-
-const currentAssessment = async (ctx: QueryCtx | MutationCtx, rfsId: Id<"rfs">) => {
-  const assessments = await ctx.db
-    .query("payoutAssessments")
-    .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
-    .collect();
-  const assessment = assessments.sort((a, b) => b._creationTime - a._creationTime)[0];
-  if (!assessment) {
-    throw new ConvexError({ code: "NOT_FOUND", message: "Payout assessment not found." });
-  }
-  return assessment;
-};
-
-const userBackedRfs = async (ctx: QueryCtx | MutationCtx, rfsId: Id<"rfs">, userId: string) => {
-  const contributions = await ctx.db
-    .query("contributions")
-    .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
-    .collect();
-  return contributions.some(
-    (contribution) => contribution.status === "accepted" && contribution.backerUserId === userId,
-  );
-};
 
 const assertCanViewEvaluation = async (ctx: QueryCtx | MutationCtx, rfs: Doc<"rfs">, userId: string) => {
   if (rfs.authorUserId === userId || rfs.claimantUserId === userId) {
@@ -350,7 +281,7 @@ export const getForRfs = query({
     version: v.number(),
     contentHash: v.string(),
     evaluationDeadline: v.number(),
-    assessmentStatus: assessmentStatusValidator,
+    assessmentStatus: payoutAssessmentStatusValidator,
     assessmentReason: v.string(),
     qualityMultiplierBps: v.number(),
     finalPayoutBaseUnits: v.int64(),
@@ -368,8 +299,8 @@ export const getForRfs = query({
     }
     await assertCanViewEvaluation(ctx, rfs, userId);
 
-    const { skill, latestVersion } = await currentSkillAndVersion(ctx, rfs._id);
-    const assessment = await currentAssessment(ctx, rfs._id);
+    const { skill, latestVersion } = await getSkillAndLatestVersion(ctx, rfs._id);
+    const assessment = await getLatestAssessmentOrThrow(ctx, rfs._id);
     const evaluations = await ctx.db
       .query("evaluationEvents")
       .withIndex("by_skillVersionId", (q) => q.eq("skillVersionId", latestVersion._id))
@@ -428,7 +359,7 @@ export const submitEvaluation = mutation({
   returns: v.object({
     evaluationEventId: v.id("evaluationEvents"),
     nextState: rfsStatusValidator,
-    assessmentStatus: assessmentStatusValidator,
+    assessmentStatus: payoutAssessmentStatusValidator,
     weightBps: v.number(),
   }),
   handler: async (ctx, args) => {
@@ -525,7 +456,7 @@ export const submitEvaluation = mutation({
       });
     }
 
-    const assessment = await currentAssessment(ctx, args.rfsId);
+    const assessment = await getLatestAssessmentOrThrow(ctx, args.rfsId);
     if ((payoutImpact === "negative" || payoutImpact === "harmful") && rfs.status !== "disputed") {
       await ctx.db.patch(rfs._id, { status: "disputed" });
       await ctx.db.patch(assessment._id, {
@@ -558,7 +489,7 @@ export const closeEvaluation = mutation({
   returns: v.object({
     rfsId: v.id("rfs"),
     nextState: rfsStatusValidator,
-    assessmentStatus: assessmentStatusValidator,
+    assessmentStatus: payoutAssessmentStatusValidator,
     qualityMultiplierBps: v.number(),
     finalPayoutBaseUnits: v.int64(),
     assessmentReason: v.string(),
@@ -575,8 +506,8 @@ export const closeEvaluation = mutation({
       throw new ConvexError({ code: "INVALID_STATE", message: "Evaluation is not open." });
     }
 
-    const { skill, latestVersion } = await currentSkillAndVersion(ctx, rfs._id);
-    const assessment = await currentAssessment(ctx, rfs._id);
+    const { skill, latestVersion } = await getSkillAndLatestVersion(ctx, rfs._id);
+    const assessment = await getLatestAssessmentOrThrow(ctx, rfs._id);
     if (Date.now() < latestVersion.evaluationDeadline && args.force !== true) {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -671,7 +602,7 @@ export const openDispute = mutation({
   returns: v.object({
     rfsId: v.id("rfs"),
     nextState: rfsStatusValidator,
-    assessmentStatus: assessmentStatusValidator,
+    assessmentStatus: payoutAssessmentStatusValidator,
   }),
   handler: async (ctx, args) => {
     const userId = await requireAuthedUserId(ctx);
@@ -680,7 +611,7 @@ export const openDispute = mutation({
       throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
     }
     await assertCanViewEvaluation(ctx, rfs, userId);
-    const assessment = await currentAssessment(ctx, rfs._id);
+    const assessment = await getLatestAssessmentOrThrow(ctx, rfs._id);
     const reason = args.reason.trim();
     if (!reason) {
       throw new ConvexError({ code: "INVALID_REASON", message: "Dispute reason is required." });

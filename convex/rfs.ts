@@ -1,48 +1,25 @@
 import { ConvexError, v } from "convex/values";
 
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { authComponent } from "./auth";
+import {
+  rfsStatusValidator,
+  skillStatusValidator,
+  payoutAssessmentStatusValidator,
+} from "./lib/validators";
+import {
+  cleanTags,
+  computeFeeSplit,
+  getLatestAssessment,
+  getLatestSkillVersion,
+  requireAuthedUserId,
+  stableContentHash,
+  userBackedRfs,
+  walletAddressValidator,
+} from "./lib/helpers";
 
-const walletAddressValidator = /^0x[a-fA-F0-9]{40}$/;
 const EVALUATION_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-const rfsStatusValidator = v.union(
-  v.literal("open"),
-  v.literal("funded"),
-  v.literal("assigned"),
-  v.literal("submitted"),
-  v.literal("evaluation_open"),
-  v.literal("accepted"),
-  v.literal("revision_requested"),
-  v.literal("disputed"),
-  v.literal("rejected"),
-  v.literal("published"),
-  v.literal("cancelled"),
-  v.literal("fulfilled"),
-);
-
-const skillStatusValidator = v.union(
-  v.literal("draft"),
-  v.literal("submitted"),
-  v.literal("evaluation_open"),
-  v.literal("accepted"),
-  v.literal("revision_requested"),
-  v.literal("disputed"),
-  v.literal("rejected"),
-  v.literal("published"),
-);
-
-const payoutAssessmentStatusValidator = v.union(
-  v.literal("pending"),
-  v.literal("claimable"),
-  v.literal("reduced"),
-  v.literal("blocked"),
-  v.literal("disputed"),
-  v.literal("manually_resolved"),
-  v.literal("claimed"),
-);
-
 const rfsDocValidator = v.object({
   _id: v.id("rfs"),
   _creationTime: v.number(),
@@ -100,32 +77,6 @@ const payoutAssessmentValidator = v.object({
   resolvedAt: v.optional(v.number()),
 });
 
-const cleanTags = (tags: string[]) =>
-  Array.from(
-    new Set(
-      tags
-        .map((tag) => tag.trim().toLowerCase())
-        .filter((tag) => tag.length > 0),
-    ),
-  );
-
-const requireAuthedUserId = async (ctx: MutationCtx | QueryCtx) => {
-  const user = await authComponent.safeGetAuthUser(ctx);
-  if (!user) {
-    throw new ConvexError({
-      code: "UNAUTHORIZED",
-      message: "Authentication required.",
-    });
-  }
-  return user._id;
-};
-
-const computeFeeSplit = (grossAmountBaseUnits: bigint) => {
-  const platformFeeBaseUnits = grossAmountBaseUnits / BigInt(100);
-  const netAmountBaseUnits = grossAmountBaseUnits - platformFeeBaseUnits;
-  return { platformFeeBaseUnits, netAmountBaseUnits };
-};
-
 const getRfsByIdOrThrow = async (ctx: MutationCtx | QueryCtx, rfsId: Doc<"rfs">["_id"]) => {
   const rfs = await ctx.db.get(rfsId);
   if (!rfs) {
@@ -136,19 +87,6 @@ const getRfsByIdOrThrow = async (ctx: MutationCtx | QueryCtx, rfsId: Doc<"rfs">[
   }
   return rfs;
 };
-
-const stableContentHash = (parts: string[]) => {
-  let hash = BigInt("0xcbf29ce484222325");
-  const prime = BigInt("0x100000001b3");
-  const mask = BigInt("0xffffffffffffffff");
-  const input = parts.join("\u001f");
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= BigInt(input.charCodeAt(index));
-    hash = (hash * prime) & mask;
-  }
-  return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
-};
-
 const sumAcceptedContributions = async (ctx: MutationCtx, rfs: Doc<"rfs">) => {
   const acceptedContributions = await ctx.db
     .query("contributions")
@@ -163,34 +101,6 @@ const sumAcceptedContributions = async (ctx: MutationCtx, rfs: Doc<"rfs">) => {
   }
   return grossAmountBaseUnits;
 };
-
-const getLatestSkillVersion = async (ctx: QueryCtx | MutationCtx, skillId: Id<"skills">) => {
-  const versions = await ctx.db
-    .query("skillVersions")
-    .withIndex("by_skill", (q) => q.eq("skillId", skillId))
-    .collect();
-  return versions.sort((a, b) => b.version - a.version)[0];
-};
-
-const getLatestAssessment = async (ctx: QueryCtx | MutationCtx, rfsId: Id<"rfs">) => {
-  const assessments = await ctx.db
-    .query("payoutAssessments")
-    .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
-    .collect();
-  return assessments.sort((a, b) => b._creationTime - a._creationTime)[0];
-};
-
-const userBackedRfs = async (ctx: QueryCtx | MutationCtx, rfsId: Id<"rfs">, userId: string) => {
-  const contributions = await ctx.db
-    .query("contributions")
-    .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
-    .collect();
-  return contributions.some(
-    (contribution) =>
-      contribution.status === "accepted" && contribution.backerUserId === userId,
-  );
-};
-
 export const create = mutation({
   args: {
     title: v.string(),

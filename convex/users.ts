@@ -2,8 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { authComponent, createAuth } from "./auth";
-
-const walletAddressValidator = /^0x[a-fA-F0-9]{40}$/;
+import { walletAddressValidator } from "./lib/helpers";
 
 export const updateWallet = mutation({
   args: {

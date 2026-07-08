@@ -2,49 +2,23 @@ import { ConvexError, type Infer, v } from "convex/values";
 
 import { query } from "./_generated/server";
 import { authComponent } from "./auth";
+import {
+  rfsStatusValidator,
+  skillStatusValidator,
+  payoutAssessmentStatusValidator,
+} from "./lib/validators";
+import {
+  cleanTags,
+  getLatestAssessment,
+  getLatestSkillVersion,
+  userBackedRfs,
+} from "./lib/helpers";
 
 const catalogStatusValidator = v.union(
   v.literal("open"),
   v.literal("funded"),
   v.literal("published"),
 );
-
-const rfsStatusValidator = v.union(
-  v.literal("open"),
-  v.literal("funded"),
-  v.literal("assigned"),
-  v.literal("submitted"),
-  v.literal("evaluation_open"),
-  v.literal("accepted"),
-  v.literal("revision_requested"),
-  v.literal("disputed"),
-  v.literal("rejected"),
-  v.literal("published"),
-  v.literal("cancelled"),
-  v.literal("fulfilled"),
-);
-
-const skillStatusValidator = v.union(
-  v.literal("draft"),
-  v.literal("submitted"),
-  v.literal("evaluation_open"),
-  v.literal("accepted"),
-  v.literal("revision_requested"),
-  v.literal("disputed"),
-  v.literal("rejected"),
-  v.literal("published"),
-);
-
-const payoutAssessmentStatusValidator = v.union(
-  v.literal("pending"),
-  v.literal("claimable"),
-  v.literal("reduced"),
-  v.literal("blocked"),
-  v.literal("disputed"),
-  v.literal("manually_resolved"),
-  v.literal("claimed"),
-);
-
 const skillDocValidator = v.object({
   _id: v.id("skills"),
   _creationTime: v.number(),
@@ -110,15 +84,6 @@ const catalogItemValidator = v.object({
   purchasePriceBaseUnits: v.optional(v.int64()),
 });
 
-const cleanTags = (tags: string[]) =>
-  Array.from(
-    new Set(
-      tags
-        .map((tag) => tag.trim().toLowerCase())
-        .filter((tag) => tag.length > 0),
-    ),
-  );
-
 const searchMatches = (queryText: string, fields: string[]) => {
   if (!queryText) {
     return true;
@@ -182,14 +147,7 @@ export const get = query({
     let viewerIsBacker = false;
 
     if (viewer) {
-      const backerContribution = await ctx.db
-        .query("contributions")
-        .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
-        .collect();
-      viewerIsBacker = backerContribution.some(
-        (contribution) =>
-          contribution.status === "accepted" && contribution.backerUserId === viewer._id,
-      );
+      viewerIsBacker = await userBackedRfs(ctx, rfs._id, viewer._id);
     }
 
     if (skill && viewer) {
@@ -205,17 +163,9 @@ export const get = query({
     }
 
     const latestSkillVersion = skill
-      ? await ctx.db
-          .query("skillVersions")
-          .withIndex("by_skill", (q) => q.eq("skillId", skill._id))
-          .collect()
-          .then((versions) => versions.sort((a, b) => b.version - a.version)[0])
+      ? await getLatestSkillVersion(ctx, skill._id)
       : undefined;
-    const payoutAssessment = await ctx.db
-      .query("payoutAssessments")
-      .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
-      .collect()
-      .then((assessments) => assessments.sort((a, b) => b._creationTime - a._creationTime)[0]);
+    const payoutAssessment = await getLatestAssessment(ctx, rfs._id);
     const evaluationCount = latestSkillVersion
       ? await ctx.db
           .query("evaluationEvents")

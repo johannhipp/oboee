@@ -2,21 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation } from "./_generated/server";
 import { authComponent } from "./auth";
-
-const rfsStatusValidator = v.union(
-  v.literal("open"),
-  v.literal("funded"),
-  v.literal("assigned"),
-  v.literal("submitted"),
-  v.literal("evaluation_open"),
-  v.literal("accepted"),
-  v.literal("revision_requested"),
-  v.literal("disputed"),
-  v.literal("rejected"),
-  v.literal("published"),
-  v.literal("cancelled"),
-  v.literal("fulfilled"),
-);
+import { rfsStatusValidator } from "./lib/validators";
 
 export const recordContribution = mutation({
   args: {
