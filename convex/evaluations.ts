@@ -5,6 +5,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import { payoutAssessmentStatusValidator, rfsStatusValidator } from "./lib/validators";
 import {
   getLatestAssessmentOrThrow,
+  getLatestSkillVersion,
   getSkillAndLatestVersion,
   requireAuthedUserId,
   userBackedRfs,
@@ -395,6 +396,27 @@ export const submitEvaluation = mutation({
       });
     }
 
+    const latestVersion = await getLatestSkillVersion(ctx, args.skillId);
+    if (!latestVersion || latestVersion._id !== args.skillVersionId) {
+      throw new ConvexError({
+        code: "INVALID_SKILL_VERSION",
+        message: "Evaluation must target the current skill version.",
+      });
+    }
+
+    const existingEvaluation = await ctx.db
+      .query("evaluationEvents")
+      .withIndex("by_reviewer_skillVersion", (q) =>
+        q.eq("reviewerIdentityId", userId).eq("skillVersionId", args.skillVersionId),
+      )
+      .first();
+    if (existingEvaluation) {
+      throw new ConvexError({
+        code: "DUPLICATE_EVALUATION",
+        message: "You have already evaluated this skill version.",
+      });
+    }
+
     const evidenceSummary = args.evidenceSummary.trim();
     if (!evidenceSummary) {
       throw new ConvexError({ code: "INVALID_EVIDENCE", message: "Evidence summary is required." });
@@ -404,9 +426,15 @@ export const submitEvaluation = mutation({
       .query("reviewerReputations")
       .withIndex("by_reviewerIdentity", (q) => q.eq("reviewerIdentityId", userId))
       .first();
-    const reviewerTrustBps = reviewerReputation?.globalTrustScore ?? 7_000;
-    const strengthBps = evidenceStrengthBps(args.evidenceType);
-    const confidenceWeightBps = confidenceBps(args.confidence);
+    const reviewerTrustBps = Math.min(
+      10_000,
+      Math.max(0, reviewerReputation?.globalTrustScore ?? 7_000),
+    );
+    const strengthBps = Math.min(10_000, Math.max(0, evidenceStrengthBps(args.evidenceType)));
+    const confidenceWeightBps = Math.min(
+      10_000,
+      Math.max(0, confidenceBps(args.confidence)),
+    );
     const weightBps = Math.round((reviewerTrustBps * strengthBps * confidenceWeightBps) / 100_000_000);
     const payoutImpact = args.outcome === "harmful"
       ? "harmful"

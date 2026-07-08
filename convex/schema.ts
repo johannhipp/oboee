@@ -169,7 +169,8 @@ export default defineSchema({
     .index("by_rfs", ["rfsId"])
     .index("by_skill_version", ["skillId", "skillVersion"])
     .index("by_skillVersionId", ["skillVersionId"])
-    .index("by_reviewer", ["reviewerIdentityId"]),
+    .index("by_reviewer", ["reviewerIdentityId"])
+    .index("by_reviewer_skillVersion", ["reviewerIdentityId", "skillVersionId"]),
 
   reviewerReputations: defineTable({
     reviewerIdentityId: v.string(),
