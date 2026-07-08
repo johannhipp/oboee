@@ -2,17 +2,8 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
-
-const skillStatusValidator = v.union(
-  v.literal("draft"),
-  v.literal("submitted"),
-  v.literal("evaluation_open"),
-  v.literal("accepted"),
-  v.literal("revision_requested"),
-  v.literal("disputed"),
-  v.literal("rejected"),
-  v.literal("published"),
-);
+import { skillStatusValidator } from "./lib/validators";
+import { computeFeeSplit } from "./lib/helpers";
 
 const skillDocValidator = v.object({
   _id: v.id("skills"),
@@ -27,12 +18,6 @@ const skillDocValidator = v.object({
   latestContentHash: v.optional(v.string()),
   status: skillStatusValidator,
 });
-
-const computeFeeSplit = (grossAmountBaseUnits: bigint) => {
-  const platformFeeBaseUnits = grossAmountBaseUnits / BigInt(100);
-  const netAmountBaseUnits = grossAmountBaseUnits - platformFeeBaseUnits;
-  return { platformFeeBaseUnits, netAmountBaseUnits };
-};
 
 export const recordPurchase = mutation({
   args: {

@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation, type MutationCtx } from "./_generated/server";
 import { authComponent } from "./auth";
+import { walletAddressValidator } from "./lib/helpers";
 
 const requireAuthedUser = async (ctx: MutationCtx) => {
   const user = await authComponent.safeGetAuthUser(ctx);
@@ -50,10 +51,22 @@ export const claimPayout = mutation({
         message: "Only the assigned author can claim payout for this RFS.",
       });
     }
+    if (rfs.status !== "published") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Payout can only be claimed after the RFS has been published.",
+      });
+    }
     if (!walletAddress) {
       throw new ConvexError({
         code: "INVALID_WALLET_ADDRESS",
         message: "Link a wallet address before claiming payout.",
+      });
+    }
+    if (!walletAddressValidator.test(walletAddress)) {
+      throw new ConvexError({
+        code: "INVALID_WALLET_ADDRESS",
+        message: "Linked wallet address is not a valid 0x-prefixed 40-hex string.",
       });
     }
 
@@ -165,7 +178,7 @@ export const claimPayout = mutation({
       claimedAmountBaseUnits,
       finalPayoutBaseUnits: payoutAssessment.finalPayoutBaseUnits,
       qualityMultiplierBps: payoutAssessment.qualityMultiplierBps,
-      assessmentStatus: payoutAssessment.status,
+      assessmentStatus: "claimed" as const,
       status: "claimed" as const,
     };
   },
