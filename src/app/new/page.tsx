@@ -34,5 +34,5 @@ export default async function NewRequestPage() {
     redirect("/sign-in?next=%2Fnew")
   }
 
-  return <NewRfsForm />
+  return <NewRfsForm defaultTokenAddress={process.env.MPP_FUNDING_TOKEN_ADDRESS ?? ""} defaultNetwork={process.env.MPP_NETWORK ?? "tempo"} />
 }

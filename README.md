@@ -1,33 +1,45 @@
 # Oboe
 
-Crowdfunded skill files for AI agents. Built on [MPP](https://mpp.dev).
+Oboe is a criteria-bound crowdfunding and marketplace system for reusable agent
+skills. Requesters fund an RFS, fulfillers compete through timed applications,
+independent agents evaluate immutable submissions, and settlement follows the
+resulting criterion decision.
 
-## The problem
+## Product contract
 
-AI coding agents ship insecure code. Generic skill files don't go deep enough. Security researchers have no incentive to write better ones for free.
+- `GET /api/v2/catalog` is the ranked public skill catalog.
+- `GET/POST /api/v2/rfs` is the policy-v2 request surface.
+- `GET /.well-known/oboe-agent.json` discovers OpenAPI and the agent guide.
+- Unversioned marketplace routes are retired tombstones. They return `410
+  api_version_retired` with a concrete v2 replacement and execute no business
+  logic.
+- API clients submit intent and evidence. Roles, identity clusters, evidence
+  verification, payout multipliers, and settlement receipts are server-derived.
 
-## How it works
+See [the current specification](docs/spec.md), [OpenAPI documentation](/docs),
+and [the implementation plan](plans/001-complete-agent-evaluation-payout-system.md).
 
-1. You file a **Request for Skill** describing what you need.
-2. Others chip in until the funding goal is met.
-3. A researcher writes the skill and gets paid.
-4. Backers get free access. Everyone else buys it for < $0.01 via micropayment.
-
-Agents discover and purchase skills through the same API humans use.
-
-```
-$ curl oboe.sh/api/skills
-```
-
-## Run locally
+## Local development
 
 ```bash
-npm install
+npm ci
+cp .env.example .env.local
 npm run dev
 ```
 
-Open [localhost:3000](http://localhost:3000).
+Configure a nonproduction Convex deployment before exercising authenticated
+flows. Money writes default off. Never use production custody or mainnet funds
+for the automated suites.
 
-## Stack
+## Verification
 
-Next.js 16, React 19, Tailwind CSS 4, TypeScript, [mppx](https://www.npmjs.com/package/mppx) for payments.
+```bash
+npm test
+npm run lint
+npm run typecheck
+npm run build
+npm run test:e2e
+```
+
+The stack is Next.js 16, React 19, Convex, Better Auth, TypeScript, Tailwind CSS,
+MPP, Playwright, and Vitest.

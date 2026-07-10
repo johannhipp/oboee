@@ -46,10 +46,10 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-50 flex justify-center pt-4 px-4">
-      <div style={{ filter: pixelBorder }}>
+    <header className="sticky top-0 z-50 overflow-x-auto px-2 pt-4 sm:px-4">
+      <div className="mx-auto w-max" style={{ filter: pixelBorder }}>
         <nav
-          className="h-11 px-6 flex items-center gap-6 bg-white"
+          className="flex h-11 items-center gap-3 bg-white px-3 sm:gap-6 sm:px-6"
           style={{ clipPath: pixelClip }}
         >
           <Link href="/" className="text-foreground hover:text-muted-foreground transition-colors duration-150" title="oboe">
@@ -78,12 +78,12 @@ export function Header() {
               {label}
             </Link>
           ))}
-          <div className="ml-2 pl-3 border-l border-gray-200">
+          <div className="ml-1 border-l border-gray-200 pl-2 sm:ml-2 sm:pl-3">
             {session?.user ? (
               <button
                 type="button"
                 onClick={handleSignOut}
-                className="text-sm font-mono text-muted-foreground hover:text-foreground transition-colors duration-150"
+                className="max-w-36 truncate text-sm font-mono text-muted-foreground hover:text-foreground transition-colors duration-150"
               >
                 {session.user.name} (sign out)
               </button>

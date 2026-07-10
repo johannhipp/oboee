@@ -1,0 +1,9 @@
+import { anyApi } from "convex/server";
+import { fetchAuthQuery, getAuthenticationStatus } from "@/lib/auth-server";
+import { toJsonValue } from "@/lib/json";
+import { WorkspaceState } from "@/components/workspace-state";
+import { ModerationControls } from "@/components/moderation-controls";
+
+export const dynamic = "force-dynamic";
+type Row = { reviewId: string; skillId: string; skillVersionId: string; rating: number; outcome: string; tags: string[]; text: string; createdAt: number; evidenceArtifactIds: string[] };
+export default async function ModerationPage() { if (await getAuthenticationStatus() !== "authenticated") return <WorkspaceState title="Review moderation" message="Sign in with a security adjudicator account." signInPath="/review/moderation" />; let rows: Row[]; try { rows = toJsonValue(await fetchAuthQuery(anyApi.postUseReviews.listModerationQueue, {})) as Row[]; } catch { return <WorkspaceState title="Review moderation" message="An active security adjudicator role is required." />; } return <main><h1 className="text-xl font-medium">Review moderation</h1><p className="mt-1 text-sm text-muted-foreground">Review evidence before changing public visibility, reputation, or quarantine.</p><div className="mt-6 space-y-8">{rows.map((row) => <article key={row.reviewId} className="border-t border-border pt-5"><div className="grid gap-2 sm:grid-cols-[1fr_auto]"><div><p className="font-medium">{row.outcome.replaceAll("_", " ")} · {row.rating}/5</p><p className="text-sm">{row.text}</p><p className="mt-1 font-mono text-xs text-muted-foreground break-all">skill {row.skillId} · version {row.skillVersionId}</p></div><p className="font-mono text-xs sm:text-right">{row.tags.join(", ")}<br />{row.evidenceArtifactIds.length} evidence artifacts</p></div><ModerationControls reviewId={row.reviewId} /></article>)}{rows.length === 0 ? <p className="text-sm text-muted-foreground">No reviews awaiting moderation.</p> : null}</div></main>; }

@@ -10,6 +10,7 @@ import {
   requireAuthedUserId,
   userBackedRfs,
 } from "./lib/helpers";
+import { retirePolicyV1 } from "./lib/legacy";
 
 const reviewerTypeValidator = v.union(
   v.literal("agent"),
@@ -259,6 +260,7 @@ const finalizeAssessment = async (
   }
 };
 
+/** @deprecated Policy v1 is retired. Use GET /api/v2/rfs/{rfsId}/evaluations. */
 export const getForRfs = query({
   args: { rfsId: v.id("rfs") },
   returns: v.object({
@@ -293,6 +295,7 @@ export const getForRfs = query({
     canRevise: v.boolean(),
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/rfs/{rfsId}/evaluations");
     const userId = await requireAuthedUserId(ctx);
     const rfs = await ctx.db.get(args.rfsId);
     if (!rfs) {
@@ -332,6 +335,7 @@ export const getForRfs = query({
   },
 });
 
+/** @deprecated Policy v1 is retired. Use POST /api/v2/rfs/{rfsId}/evaluations. */
 export const submitEvaluation = mutation({
   args: {
     rfsId: v.id("rfs"),
@@ -364,6 +368,7 @@ export const submitEvaluation = mutation({
     weightBps: v.number(),
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("POST /api/v2/rfs/{rfsId}/evaluations");
     const userId = await requireAuthedUserId(ctx);
     const rfs = await ctx.db.get(args.rfsId);
     if (!rfs) {
@@ -509,6 +514,7 @@ export const submitEvaluation = mutation({
   },
 });
 
+/** @deprecated Requester force-close is removed. Lifecycle workers close policy-v2 windows. */
 export const closeEvaluation = mutation({
   args: {
     rfsId: v.id("rfs"),
@@ -523,6 +529,7 @@ export const closeEvaluation = mutation({
     assessmentReason: v.string(),
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/rfs/{rfsId}/events");
     const userId = await requireAuthedUserId(ctx);
     const rfs = await ctx.db.get(args.rfsId);
     if (!rfs) {
@@ -629,6 +636,7 @@ export const closeEvaluation = mutation({
   },
 });
 
+/** @deprecated Policy v1 is retired. Use POST /api/v2/rfs/{rfsId}/disputes. */
 export const openDispute = mutation({
   args: {
     rfsId: v.id("rfs"),
@@ -640,6 +648,7 @@ export const openDispute = mutation({
     assessmentStatus: payoutAssessmentStatusValidator,
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("POST /api/v2/rfs/{rfsId}/disputes");
     const userId = await requireAuthedUserId(ctx);
     const rfs = await ctx.db.get(args.rfsId);
     if (!rfs) {

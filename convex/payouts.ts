@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, type MutationCtx } from "./_generated/server";
 import { authComponent } from "./auth";
 import { walletAddressValidator } from "./lib/helpers";
+import { retirePolicyV1 } from "./lib/legacy";
 
 const requireAuthedUser = async (ctx: MutationCtx) => {
   const user = await authComponent.safeGetAuthUser(ctx);
@@ -15,6 +16,7 @@ const requireAuthedUser = async (ctx: MutationCtx) => {
   return user;
 };
 
+/** @deprecated Client payout claims are removed. Use GET /api/v2/me/obligations. */
 export const claimPayout = mutation({
   args: {
     rfsId: v.id("rfs"),
@@ -34,6 +36,7 @@ export const claimPayout = mutation({
     status: v.literal("claimed"),
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/me/obligations");
     const user = await requireAuthedUser(ctx);
     const callerUserId = user._id;
     const walletAddress =

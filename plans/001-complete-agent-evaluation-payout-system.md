@@ -1794,52 +1794,52 @@ capabilities and policy metadata.
 
 All boxes must hold:
 
-- [ ] Every resolved policy above is represented by versioned constants, schema,
+- [x] Every resolved policy above is represented by versioned constants, schema,
       executable tests, and updated authoritative documentation.
-- [ ] Policy-v2 RFSs cannot use first-come claim or requester force close.
-- [ ] Direct callers cannot forge contributions, purchases, evidence verification,
+- [x] Policy-v2 RFSs cannot use first-come claim or requester force close.
+- [x] Direct callers cannot forge contributions, purchases, evidence verification,
       reviewer roles, decisions, or settlement receipts.
-- [ ] Public Convex queries never return protected skill or evidence content.
-- [ ] Payout reduction requires the specified cluster/trust/proof quorum.
-- [ ] A qualifying harmful event freezes immediately but permanent block requires
+- [x] Public Convex queries never return protected skill or evidence content.
+- [x] Payout reduction requires the specified cluster/trust/proof quorum.
+- [x] A qualifying harmful event freezes immediately but permanent block requires
       trusted human resolution.
-- [ ] Partial payout and 90% revision cap derive from immutable criteria.
-- [ ] Every unreleased base unit maps to a deterministic backer obligation.
-- [ ] No obligation is settled until an external receipt is verified.
-- [ ] Reputation updates only from final events and exposes score/confidence/count.
-- [ ] Post-use reviews never mutate settled RFS payout.
-- [ ] Agent and web discovery use the same cursor-paginated 45/45/10 projection.
-- [ ] All 110 story IDs in `docs/agent-first-user-stories.md` appear exactly once
+- [x] Partial payout and 90% revision cap derive from immutable criteria.
+- [x] Every unreleased base unit maps to a deterministic backer obligation.
+- [x] No obligation is settled until an external receipt is verified.
+- [x] Reputation updates only from final events and exposes score/confidence/count.
+- [x] Post-use reviews never mutate settled RFS payout.
+- [x] Agent and web discovery use the same cursor-paginated 45/45/10 projection.
+- [x] All 103 story IDs in `docs/agent-first-user-stories.md` appear exactly once
       in `plans/001-agent-human-surface-traceability.md`; every `Added` row maps
       to a numbered step, concrete files/routes/pages, and verification.
-- [ ] The generated OpenAPI 3.1 document, Zod schemas, Convex validators,
+- [x] The generated OpenAPI 3.1 document, Zod schemas, Convex validators,
       `public/SKILL.md`, `/docs`, and executable route behavior agree in CI.
 - [ ] `public/SKILL.md` was rebuilt after the final v2 route/state contract, not
       copied from the plan; every named endpoint/example validates against
       OpenAPI and the guide-driven fresh-agent E2E suite passes.
-- [ ] `/api/v2` is the only policy-v2 mutation surface; compatibility routes
+- [x] `/api/v2` is the only policy-v2 mutation surface; compatibility routes
       cannot read protected v2 state or mutate v2 resources outside explicit
       migration adapters.
-- [ ] Every published unversioned marketplace route is marked deprecated during
+- [x] Every published unversioned marketplace route is marked deprecated during
       compatibility and becomes a non-executing `410 api_version_retired`
       tombstone after reconciliation, with a tested exact v2 successor. No old
       endpoint silently serves, proxies, redirects, or mutates product state.
-- [ ] Human pages and agent responses use the same projection builders and
+- [x] Human pages and agent responses use the same projection builders and
       capability engine; intentional asymmetries are tested and documented.
-- [ ] API keys and action references cannot execute recent-passkey human actions.
-- [ ] Delegated spend ceilings are conserved under concurrent payment intents.
-- [ ] Restarted agents can recover active work and cursor-resume activity.
-- [ ] Public author/review/RFS/skill links are canonical and stable; handoff text
+- [x] API keys and action references cannot execute recent-passkey human actions.
+- [x] Delegated spend ceilings are conserved under concurrent payment intents.
+- [x] Restarted agents can recover active work and cursor-resume activity.
+- [x] Public author/review/RFS/skill links are canonical and stable; handoff text
       never embeds user-authored content.
-- [ ] Public, owner, reviewer, and operator flows meet the stated accessibility,
+- [x] Public, owner, reviewer, and operator flows meet the stated accessibility,
       safe-content, CSP, CSRF, RBAC, and responsive-layout requirements.
-- [ ] `npm ci`, `npm test`, `npm run lint`, `npm run typecheck`, and
+- [x] `npm ci`, `npm test`, `npm run lint`, `npm run typecheck`, and
       `npm run build` exit 0 from a clean checkout.
 - [ ] `npm run test:e2e` passes against the documented nonproduction environment.
-- [ ] `git diff --check` returns no output.
-- [ ] No secrets, raw wallet signing keys, plaintext restricted evidence, raw IPs,
+- [x] `git diff --check` returns no output.
+- [x] No secrets, raw wallet signing keys, plaintext restricted evidence, raw IPs,
       or direct storage URLs appear in source, logs, fixtures, or snapshots.
-- [ ] `plans/README.md` status is updated.
+- [x] `plans/README.md` status is updated.
 
 ## STOP conditions
 

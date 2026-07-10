@@ -21,7 +21,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <Header />
-        <main className="min-h-screen max-w-4xl mx-auto px-4">{children}</main>
+        <main className="min-h-screen w-full px-4">{children}</main>
       </body>
     </html>
   );

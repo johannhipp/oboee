@@ -18,6 +18,7 @@ import {
   userBackedRfs,
   walletAddressValidator,
 } from "./lib/helpers";
+import { retirePolicyV1 } from "./lib/legacy";
 
 const EVALUATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 const rfsDocValidator = v.object({
@@ -101,6 +102,7 @@ const sumAcceptedContributions = async (ctx: MutationCtx, rfs: Doc<"rfs">) => {
   }
   return grossAmountBaseUnits;
 };
+/** @deprecated Policy v1 is retired. Use POST /api/v2/rfs. */
 export const create = mutation({
   args: {
     title: v.string(),
@@ -116,6 +118,7 @@ export const create = mutation({
     nextState: rfsStatusValidator,
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("POST /api/v2/rfs");
     const authorUserId = await requireAuthedUserId(ctx);
     const title = args.title.trim();
     const description = args.description.trim();
@@ -169,12 +172,14 @@ export const create = mutation({
       currentAmountBaseUnits: BigInt(0),
       fundingTokenAddress,
       status: "open",
+      policyVersion: 1,
     });
 
     return { rfsId, nextState: "open" as const };
   },
 });
 
+/** @deprecated Policy v1 is retired. Use GET /api/v2/rfs/{rfsId}. */
 export const get = query({
   args: {
     rfsId: v.id("rfs"),
@@ -192,6 +197,7 @@ export const get = query({
     hasClaimant: v.boolean(),
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/rfs/{rfsId}");
     const rfs = await ctx.db.get(args.rfsId);
 
     if (!rfs) {
@@ -252,6 +258,7 @@ export const get = query({
   },
 });
 
+/** @deprecated Policy v1 is retired. Use GET /api/v2/catalog. */
 export const list = query({
   args: {
     status: v.optional(rfsStatusValidator),
@@ -259,6 +266,7 @@ export const list = query({
   },
   returns: v.array(rfsDocValidator),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/catalog");
     if (args.authorId) {
       const docs = await ctx.db
         .query("rfs")
@@ -283,6 +291,7 @@ export const list = query({
   },
 });
 
+/** @deprecated Policy v1 is retired. Use GET /api/v2/rfs/{rfsId}/settlement. */
 export const listContributions = query({
   args: {
     rfsId: v.id("rfs"),
@@ -296,6 +305,7 @@ export const listContributions = query({
     }),
   ),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/rfs/{rfsId}/settlement");
     const rows = await ctx.db
       .query("contributions")
       .withIndex("by_rfs", (q) => q.eq("rfsId", args.rfsId))
@@ -313,6 +323,7 @@ export const listContributions = query({
   },
 });
 
+/** @deprecated First-come claiming is removed. Use POST /api/v2/rfs/{rfsId}/applications. */
 export const claim = mutation({
   args: {
     rfsId: v.id("rfs"),
@@ -323,8 +334,16 @@ export const claim = mutation({
     nextState: rfsStatusValidator,
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("POST /api/v2/rfs/{rfsId}/applications");
     const callerUserId = await requireAuthedUserId(ctx);
     const rfs = await getRfsByIdOrThrow(ctx, args.rfsId);
+
+    if (rfs.policyVersion === 2) {
+      throw new ConvexError({
+        code: "API_VERSION_RETIRED",
+        message: "Policy-v2 requests use scored applications; direct claim is unavailable.",
+      });
+    }
 
     if (rfs.status !== "funded") {
       throw new ConvexError({
@@ -353,6 +372,7 @@ export const claim = mutation({
   },
 });
 
+/** @deprecated Policy v1 is retired. Use POST /api/v2/rfs/{rfsId}/submissions. */
 export const submit = mutation({
   args: {
     rfsId: v.id("rfs"),
@@ -372,6 +392,7 @@ export const submit = mutation({
     nextState: rfsStatusValidator,
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("POST /api/v2/rfs/{rfsId}/submissions");
     const callerUserId = await requireAuthedUserId(ctx);
     const contentMarkdown = args.contentMarkdown.trim();
     const summary = args.summary.trim();
@@ -388,6 +409,13 @@ export const submit = mutation({
     }
 
     const rfs = await getRfsByIdOrThrow(ctx, args.rfsId);
+
+    if (rfs.policyVersion === 2) {
+      throw new ConvexError({
+        code: "API_VERSION_RETIRED",
+        message: "Policy-v2 submissions use the versioned submission workflow.",
+      });
+    }
 
     if (rfs.claimantUserId !== callerUserId) {
       throw new ConvexError({ code: "FORBIDDEN", message: "Only the assigned claimant can submit this RFS." });
