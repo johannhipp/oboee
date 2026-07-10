@@ -1,126 +1,72 @@
-import type { Metadata } from "next"
-import Link from "next/link"
-import { fetchQuery } from "convex/nextjs"
-import { api } from "../../../convex/_generated/api"
-import { RFSRow } from "@/components/rfs-row"
-import { DataToast, SkeletonRows } from "@/components/data-fallback"
-import { toRfsViewModel } from "@/lib/view-models"
-import { convexUnavailableMessage } from "@/lib/auth-server"
+import type { Metadata } from "next";
+import Link from "next/link";
+import { anyApi } from "convex/server";
+import { fetchQuery } from "convex/nextjs";
 
-export const dynamic = "force-dynamic"
+import { CopyBox } from "@/components/copy-box";
+import { DataToast } from "@/components/data-fallback";
+import { MarketplaceRow } from "@/components/marketplace-row";
+import { convexUnavailableMessage } from "@/lib/auth-server";
+import { searchHandoff } from "@/lib/handoff";
+import { buildCatalogReadModel, buildPublicRfsListReadModel } from "@/lib/read-models/public";
 
-export const metadata: Metadata = { title: "Browse | Oboe" }
+export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "Browse | Oboe", alternates: { canonical: "/browse" } };
 
-const statusOrder = [
-  "open",
-  "funded",
-  "assigned",
-  "evaluation_open",
-  "disputed",
-  "revision_requested",
-  "published",
-  "rejected",
-  "cancelled",
-] as const
+type Search = { q?: string; status?: string; tag?: string | string[]; author?: string; cursor?: string };
 
-const isStatus = (value: string | undefined): value is (typeof statusOrder)[number] =>
-  statusOrder.some((status) => status === value)
-
-export default async function BrowsePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ status?: string; q?: string }>
-}) {
-  const params = await searchParams
-  const status = isStatus(params.status) ? params.status : undefined
-  const q = params.q?.trim().toLowerCase() ?? ""
-  let dataUnavailable = false
-  let rows: Awaited<typeof api.rfs.list._returnType> = []
-
+export default async function BrowsePage({ searchParams }: { searchParams: Promise<Search> }) {
+  const params = await searchParams;
+  const tags = Array.isArray(params.tag) ? params.tag : params.tag ? [params.tag] : [];
+  let unavailable = false;
+  let skills: ReturnType<typeof buildCatalogReadModel> = { items: [], nextCursor: null };
+  let requests: ReturnType<typeof buildPublicRfsListReadModel> = [];
   try {
-    rows = await fetchQuery(api.rfs.list, { status })
+    const [catalog, rfs] = await Promise.all([
+      fetchQuery(anyApi.reputation.catalog, { authorHandle: params.author, tags, cursor: params.cursor, limit: 30 }),
+      fetchQuery(anyApi.rfsV2.listPublic, { status: params.status || undefined, limit: 50 }),
+    ]);
+    skills = buildCatalogReadModel(catalog);
+    requests = buildPublicRfsListReadModel(rfs);
   } catch {
-    dataUnavailable = true
+    unavailable = true;
   }
-
-  const filtered = rows.filter((rfs) => {
-    if (!q) {
-      return true
-    }
-    return [rfs.title, rfs.description, rfs.scope, ...rfs.tags]
-      .join(" ")
-      .toLowerCase()
-      .includes(q)
-  })
-
-  const sortedRfs = filtered
-    .map(toRfsViewModel)
-    .sort((a, b) => {
-      const aIdx = statusOrder.indexOf(a.status as (typeof statusOrder)[number])
-      const bIdx = statusOrder.indexOf(b.status as (typeof statusOrder)[number])
-      if (aIdx !== bIdx) return (aIdx === -1 ? statusOrder.length : aIdx) - (bIdx === -1 ? statusOrder.length : bIdx)
-      if (a.status === "open" && b.status === "open") {
-        const aRatio = a.fundingThreshold > 0 ? a.currentAmount / a.fundingThreshold : 0
-        const bRatio = b.fundingThreshold > 0 ? b.currentAmount / b.fundingThreshold : 0
-        return bRatio - aRatio
-      }
-      return 0
-    })
-
-  const pills = [
-    { label: "all", href: "/browse", active: !status },
-    { label: "open", href: "/browse?status=open", active: status === "open" },
-    { label: "funded", href: "/browse?status=funded", active: status === "funded" },
-    { label: "in review", href: "/browse?status=evaluation_open", active: status === "evaluation_open" },
-    { label: "disputed", href: "/browse?status=disputed", active: status === "disputed" },
-    { label: "revision", href: "/browse?status=revision_requested", active: status === "revision_requested" },
-    { label: "published", href: "/browse?status=published", active: status === "published" },
-  ]
+  const query = params.q?.trim().toLowerCase();
+  const visibleRequests = requests.filter((item) => !query || `${item.title} ${item.description} ${item.scope} ${item.tags.join(" ")}`.toLowerCase().includes(query));
 
   return (
-    <section>
-      <h1 className="text-xl font-medium tracking-tight mb-6 mt-8">Browse</h1>
-      {dataUnavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
-
-      <div className="flex items-center gap-3 mb-6 flex-wrap">
-        {pills.map((pill) => (
-          <Link
-            key={pill.label}
-            href={pill.href}
-            className={
-              pill.active
-                ? "font-mono text-xs px-2.5 py-1 rounded-full bg-gray-900 text-white"
-                : "font-mono text-xs px-2.5 py-1 rounded-full text-muted-foreground ring-1 ring-gray-200 hover:ring-gray-300"
-            }
-          >
-            {pill.label}
-          </Link>
-        ))}
-        <form action="/browse" method="get" className="w-full max-w-sm">
-          {status ? <input type="hidden" name="status" value={status} /> : null}
-          <input
-            name="q"
-            defaultValue={params.q ?? ""}
-            type="text"
-            placeholder="search skills and requests..."
-            className="bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 font-mono text-sm placeholder:text-gray-400 w-full"
-          />
-        </form>
+    <section className="mx-auto max-w-4xl py-8">
+      <div className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-xl font-medium">Marketplace</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Ranked published skills and criteria-bound requests.</p>
+        </div>
+        <Link href="/new" className="font-mono text-sm underline underline-offset-4">new request</Link>
       </div>
+      {unavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
+      <form action="/browse" className="grid gap-3 border-b border-border py-4 sm:grid-cols-[1fr_10rem_10rem_auto]">
+        <label className="grid gap-1 text-xs font-mono text-muted-foreground">Search<input name="q" defaultValue={params.q} className="h-9 border border-border bg-white px-3 text-sm text-foreground" /></label>
+        <label className="grid gap-1 text-xs font-mono text-muted-foreground">Status<select name="status" defaultValue={params.status ?? ""} className="h-9 border border-border bg-white px-2 text-sm text-foreground"><option value="">all requests</option><option value="open">open</option><option value="funded">funded</option><option value="evaluation_open">evaluating</option><option value="disputed">disputed</option></select></label>
+        <label className="grid gap-1 text-xs font-mono text-muted-foreground">Tag<input name="tag" defaultValue={tags[0]} className="h-9 border border-border bg-white px-3 text-sm text-foreground" /></label>
+        <button className="self-end h-9 border border-foreground px-4 font-mono text-sm">filter</button>
+      </form>
 
-      <div className="flex items-center gap-4 px-3 py-2 text-xs font-mono uppercase text-muted-foreground border-b border-gray-200 mb-1">
-        <span className="w-6 text-right">#</span>
-        <span className="flex-1">title</span>
-        <span className="w-28">status</span>
-        <span className="w-28 text-right">funded</span>
-        <span className="w-24">author</span>
+      <div className="grid gap-8 py-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div>
+          <h2 className="mb-2 font-mono text-xs uppercase text-muted-foreground">Open work</h2>
+          {visibleRequests.map((item) => <MarketplaceRow key={item.id} item={{ id: item.id, kind: "rfs", title: item.title, status: item.status, tags: item.tags, amount: item.totalFundingTargetBaseUnits }} />)}
+          {!unavailable && visibleRequests.length === 0 ? <p className="border-b border-border py-6 text-sm text-muted-foreground">No matching requests.</p> : null}
+
+          <h2 className="mb-2 mt-8 font-mono text-xs uppercase text-muted-foreground">Published skills</h2>
+          {skills.items.map((item) => <MarketplaceRow key={item.id} item={{ id: item.id, kind: "skill", title: item.category, status: item.quarantineState, tags: item.tags, authorHandle: item.authorHandle, scoreBps: item.totalBps, confidence: item.confidence }} />)}
+          {!unavailable && skills.items.length === 0 ? <p className="border-b border-border py-6 text-sm text-muted-foreground">No matching published skills.</p> : null}
+          {skills.nextCursor ? <Link className="mt-4 inline-block font-mono text-sm underline" href={{ pathname: "/browse", query: { ...params, cursor: skills.nextCursor } }}>next page</Link> : null}
+        </div>
+        <aside>
+          <h2 className="mb-2 font-mono text-xs uppercase text-muted-foreground">Send search to agent</h2>
+          <CopyBox text={searchHandoff({ q: params.q, status: params.status, tags, author: params.author })} />
+        </aside>
       </div>
-
-      {dataUnavailable ? (
-        <SkeletonRows count={6} />
-      ) : (
-        sortedRfs.map((rfs, i) => <RFSRow key={rfs.id} rfs={rfs} rank={i + 1} />)
-      )}
     </section>
-  )
+  );
 }

@@ -8,9 +8,13 @@ its STOP conditions, and update the row below when the implementation is done.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | Complete the agent evaluation, assignment, and payout system | P1 | L | - | TODO |
+| 001 | Complete the agent evaluation, assignment, and payout system | P1 | L | - | IN PROGRESS |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
+
+Plan 001 source implementation and local suites are complete. The remaining
+completion gate is the provider-backed journey in an isolated Convex deployment
+with fake MPP, KMS, scanner, signer, and custody services.
 REJECTED (with one-line rationale)
 
 ## Dependency notes

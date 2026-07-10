@@ -5,6 +5,7 @@ import { internalMutation, mutation, query, type MutationCtx } from "./_generate
 import { ratingToScore } from "./lib/reputationPolicy";
 import { POLICY_V2 } from "./lib/policy";
 import { getOrCreatePrincipalCluster, requireActiveRole, requirePrincipal, requireRecentPasskey } from "./lib/principals";
+import { recordPrincipalActivity } from "./lib/activity";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const outcomeValidator = v.union(v.literal("unable_to_apply"), v.literal("no_effect"), v.literal("improved"), v.literal("resolved"), v.literal("harmful"));
@@ -27,6 +28,8 @@ const quarantine = async (ctx: MutationCtx, review: Doc<"postUseReviews">) => {
   await ctx.db.patch(version._id, { quarantineState: "held" });
   await ctx.db.patch(skill._id, { quarantineState: "held", safeFallbackVersionId: fallback?._id });
   await ctx.db.insert("quarantineEvents", { skillId: skill._id, skillVersionId: version._id, triggeringReviewId: review._id, priorState: skill.quarantineState ?? "clear", nextState: "held", reason: "verified_post_use_harmful_report", publicRedaction: "A verified harmful outcome is under trusted review.", salesHeld: true, purchasePayoutsHeld: true, safeFallbackVersionId: fallback?._id, occurredAt: Date.now() });
+  await recordPrincipalActivity(ctx, { principalId: skill.authorUserId, role: "author", resourceType: "skillVersion", resourceId: String(version._id), eventType: "quarantine_held", publicSummary: "A verified harmful report placed this skill version on hold." });
+  await recordPrincipalActivity(ctx, { principalId: review.reviewerPrincipalId, role: "reviewer", resourceType: "postUseReview", resourceId: String(review._id), eventType: "harmful_review_held", publicSummary: "Your verified harmful report opened trusted moderation." });
   const batches = await ctx.db.query("purchasePayoutBatches").withIndex("by_skill", (query) => query.eq("skillId", skill._id)).collect();
   for (const batch of batches.filter((item) => item.state === "open")) await ctx.db.patch(batch._id, { state: "held" });
 };
@@ -116,6 +119,9 @@ export const finalizeDue = internalMutation({
     for (const review of due) {
       await emitReviewEvents(ctx, review, ratingToScore(review.rating as 1 | 2 | 3 | 4 | 5));
       await ctx.db.patch(review._id, { state: "finalized", finalizedAt: now });
+      const skill = await ctx.db.get(review.skillId);
+      await recordPrincipalActivity(ctx, { principalId: review.reviewerPrincipalId, role: "reviewer", resourceType: "postUseReview", resourceId: String(review._id), eventType: "review_finalized", publicSummary: "Post-use review finalized into reputation.", occurredAt: now });
+      if (skill) await recordPrincipalActivity(ctx, { principalId: skill.authorUserId, role: "author", resourceType: "postUseReview", resourceId: String(review._id), eventType: "review_finalized", publicSummary: "A post-use review finalized for your skill.", occurredAt: now });
     }
     return { finalized: due.length };
   },
@@ -146,9 +152,25 @@ export const moderate = mutation({
         await ctx.db.patch(skill._id, { quarantineState: nextState, publishedVersionId: nextState === "clear" ? skill.publishedVersionId : skill.safeFallbackVersionId });
         await ctx.db.patch(review.skillVersionId, { quarantineState: nextState });
         await ctx.db.insert("quarantineEvents", { skillId: skill._id, skillVersionId: review.skillVersionId, triggeringReviewId: review._id, priorState: "held", nextState, reason: args.resolution, publicRedaction: args.publicRationale.trim(), salesHeld: nextState !== "clear", purchasePayoutsHeld: nextState !== "clear", safeFallbackVersionId: skill.safeFallbackVersionId, resolvedByPrincipalId: principal.principalId, occurredAt: Date.now() });
+        await recordPrincipalActivity(ctx, { principalId: skill.authorUserId, role: "author", resourceType: "skillVersion", resourceId: String(review.skillVersionId), eventType: "quarantine_resolved", publicSummary: `Skill quarantine resolved as ${nextState}.` });
       }
     }
+    await recordPrincipalActivity(ctx, { principalId: review.reviewerPrincipalId, role: "reviewer", resourceType: "postUseReview", resourceId: String(review._id), eventType: "review_moderated", publicSummary: `Post-use review moderation resolved as ${args.resolution}.` });
     return { state: args.resolution === "remove" ? "removed" : "finalized" };
+  },
+});
+
+export const listModerationQueue = query({
+  args: {},
+  returns: v.any(),
+  handler: async (ctx) => {
+    const principal = await requirePrincipal(ctx);
+    await requireActiveRole(ctx, { principalId: principal.principalId, role: "security_adjudicator" });
+    const rows = await ctx.db.query("postUseReviews").withIndex("by_state_and_finalizeAt", (query) => query.eq("state", "moderation")).take(100);
+    return await Promise.all(rows.map(async (review) => {
+      const revision = review.currentRevisionId ? await ctx.db.get(review.currentRevisionId) : null;
+      return { reviewId: review._id, skillId: review.skillId, skillVersionId: review.skillVersionId, rating: review.rating, outcome: review.outcome, tags: review.tags, text: review.text, createdAt: review.createdAt, evidenceArtifactIds: revision?.evidenceArtifactIds ?? [] };
+    }));
   },
 });
 

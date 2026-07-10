@@ -3,6 +3,8 @@ import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { computeFeeSplit, getLatestSkillVersion, userBackedRfs } from "./lib/helpers";
+import { recordPrincipalActivity } from "./lib/activity";
+import { retirePolicyV1 } from "./lib/legacy";
 import { requirePrincipal } from "./lib/principals";
 import { skillStatusValidator } from "./lib/validators";
 
@@ -148,6 +150,7 @@ const principalHasSkillAccess = async (
   return assignments.some((assignment) => assignment.rfsId === skill.rfsId);
 };
 
+/** @deprecated Legacy access summary is retired. Use GET /api/v2/skills/{skillId}. */
 export const checkAccess = query({
   args: { skillId: v.id("skills") },
   returns: v.object({
@@ -164,6 +167,7 @@ export const checkAccess = query({
     ),
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/skills/{skillId}");
     const skill = await ctx.db.get(args.skillId);
     if (!skill) {
       return { hasAccess: false, skill: null, skillVersion: null };
@@ -203,6 +207,7 @@ export const checkAccess = query({
   },
 });
 
+/** @deprecated Legacy content reads are retired. Use exact-version v2 content redemption. */
 export const getAuthorizedContent = query({
   args: { skillId: v.id("skills"), skillVersionId: v.optional(v.id("skillVersions")) },
   returns: v.object({
@@ -215,6 +220,7 @@ export const getAuthorizedContent = query({
     tags: v.array(v.string()),
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/skills/{skillId}/versions/{versionId}/content");
     const principal = await requirePrincipal(ctx);
     const skill = await ctx.db.get(args.skillId);
     if (!skill) {
@@ -276,6 +282,7 @@ export const redeemContent = mutation({
         const authorMembership = (await ctx.db.query("identityClusterMemberships").withIndex("by_principal", (query) => query.eq("principalId", skill.authorUserId)).collect()).find((item) => item.activeUntil === undefined);
         const adoptionWeightBps = authorMembership?.clusterId === membership.clusterId ? 0 : grant.source === "admin" || grant.source === "evaluation" ? 2_500 : 10_000;
         await ctx.db.insert("installEvents", { principalId: principal.principalId, identityClusterId: membership.clusterId, skillId: skill._id, skillVersionId: version._id, accessGrantId: grant._id, adoptionWeightBps, redeemedAt: Date.now() });
+        await recordPrincipalActivity(ctx, { principalId: principal.principalId, role: "installer", resourceType: "skillVersion", resourceId: String(version._id), eventType: "skill_installed", publicSummary: `Installed skill version ${version.version}.`, capabilityReference: `skill:${String(skill._id)}` });
         installRecorded = true;
       }
       if (!grant.redeemedAt) await ctx.db.patch(grant._id, { redeemedAt: Date.now(), skillVersionId: version._id });

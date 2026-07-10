@@ -1,17 +1,6 @@
 import { Mppx, tempo } from "mppx/nextjs";
 import { privateKeyToAccount } from "viem/accounts";
 
-// =============================================================================
-// MIGRATION: Testnet -> Mainnet
-// When switching to production with tempo wallet, change these values:
-//
-// 1. RECIPIENT_ADDRESS -> your mainnet wallet address (from `tempo wallet -t whoami`)
-// 2. CURRENCY_ADDRESS  -> mainnet USDC: "0x..." (check https://docs.tempo.xyz/quickstart/tokenlist)
-// 3. RPC_URL           -> "https://rpc.tempo.xyz" (or remove to use default)
-//
-// Everything else stays the same. No code changes needed.
-// =============================================================================
-
 const RECIPIENT_ADDRESS = process.env.MPP_RECIPIENT_ESCROW_ADDRESS;
 const CURRENCY_ADDRESS = process.env.MPP_FUNDING_TOKEN_ADDRESS;
 const FEE_PAYER_PRIVATE_KEY = process.env.MPP_FEE_PAYER_PRIVATE_KEY;
@@ -74,8 +63,6 @@ const createMppx = () => {
         currency: currencyAddress,
         recipient: recipientAddress,
         ...(feePayerAccount ? { feePayer: feePayerAccount } : {}),
-        // MIGRATION: uncomment for mainnet fee sponsorship
-        // feePayer: privateKeyToAccount('0x...'),
       }),
     ],
   });

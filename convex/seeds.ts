@@ -4,8 +4,9 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { stableContentHash } from "./lib/helpers";
 import { rfsStatusValidator } from "./lib/validators";
+import { retirePolicyV1 } from "./lib/legacy";
 
-const MAINNET_USDC = "0x20c000000000000000000000b9537d11c60e8b50";
+const SEED_TOKEN_ADDRESS = "0x1111111111111111111111111111111111111111";
 
 const insertPublishedSkillVersion = async (
   ctx: MutationCtx,
@@ -93,6 +94,7 @@ const insertPublishedSkillVersion = async (
   return skillId;
 };
 
+/** @deprecated This policy-v1 dataset is retained only for migration fixtures. */
 export const seedCveDataset = mutation({
   args: {},
   returns: v.object({
@@ -100,6 +102,7 @@ export const seedCveDataset = mutation({
     reusedRfsIds: v.array(v.id("rfs")),
   }),
   handler: async (ctx) => {
+    retirePolicyV1("the policy-v2 fixture and migration test harness");
     const definitions = [
       {
         title: "CVE chain: edge exhaustion -> origin desync",
@@ -174,7 +177,7 @@ export const seedCveDataset = mutation({
         fundingThresholdBaseUnits: def.fundingThresholdBaseUnits,
         minimumContributionBaseUnits: def.minimumContributionBaseUnits,
         currentAmountBaseUnits: def.currentAmountBaseUnits,
-        fundingTokenAddress: MAINNET_USDC,
+        fundingTokenAddress: SEED_TOKEN_ADDRESS,
         status: def.status,
       });
 

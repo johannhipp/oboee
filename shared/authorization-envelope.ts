@@ -175,3 +175,21 @@ export const evidenceFinalizePayload = (args: {
     proofSignature: args.proofSignature,
     signingKeyId: args.signingKeyId,
   });
+
+export const fixtureFinalizePayload = (args: {
+  uploadIntentId: string;
+  principalId: string;
+  storageId: string;
+  bundleSha256: string;
+  sizeBytes: number;
+  verifiedAt: number;
+}) =>
+  JSON.stringify({
+    kind: "fixture_finalize",
+    uploadIntentId: args.uploadIntentId,
+    principalId: args.principalId,
+    storageId: args.storageId,
+    bundleSha256: args.bundleSha256,
+    sizeBytes: args.sizeBytes,
+    verifiedAt: args.verifiedAt,
+  });

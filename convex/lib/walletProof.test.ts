@@ -1,4 +1,4 @@
-import { privateKeyToAccount } from "viem/accounts";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,9 +8,7 @@ import {
   walletMessageDigest,
 } from "./walletProof";
 
-const account = privateKeyToAccount(
-  "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-);
+const account = privateKeyToAccount(generatePrivateKey());
 
 describe("wallet proof", () => {
   it("verifies only the exact SIWE message signed by the requested wallet", async () => {

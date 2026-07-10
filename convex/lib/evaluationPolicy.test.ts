@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { acceptanceQuorum, harmfulHold, reductionQuorum, type EvaluationSignal } from "./evaluationPolicy";
+import { acceptanceQuorum, harmfulHold, nextReviewAssignmentFee, reductionQuorum, type EvaluationSignal } from "./evaluationPolicy";
 
 const signal = (overrides: Partial<EvaluationSignal> = {}): EvaluationSignal => ({
   clusterId: "cluster-a",
@@ -83,5 +83,18 @@ describe("harmful hold", () => {
     [{ relevantTagTrustBps: 8_000, harmful: true, machineVerifiedProof: false }, false],
   ] as const)("does not hold for incomplete signal %#", (overrides, expected) => {
     expect(harmfulHold([signal(overrides)]).hold).toBe(expected);
+  });
+});
+
+describe("review reserve assignment", () => {
+  it("never double-commits fees already held by an open assignment", () => {
+    expect(nextReviewAssignmentFee(BigInt(100), [
+      { state: "open", reserveFeeBaseUnits: BigInt(70) },
+      { state: "declined", reserveFeeBaseUnits: BigInt(80) },
+    ])).toBe(BigInt(30));
+    expect(nextReviewAssignmentFee(BigInt(100), [
+      { state: "accepted", reserveFeeBaseUnits: BigInt(70) },
+      { state: "completed", reserveFeeBaseUnits: BigInt(30) },
+    ])).toBe(BigInt(0));
   });
 });

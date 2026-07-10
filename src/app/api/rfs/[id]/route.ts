@@ -1,21 +1,5 @@
-import { api } from "../../../../../convex/_generated/api";
-import type { Id } from "../../../../../convex/_generated/dataModel";
-import { fetchAuthQuery, isAuthenticated } from "@/lib/auth-server";
-
-import { errorResponse, errorResponseFrom } from "../../_lib/responses";
+import { retiredApiResponse } from "@/lib/api-v2/legacy-routes";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await isAuthenticated())) {
-    return errorResponse("UNAUTHORIZED", "Authentication required.", 401);
-  }
-
-  try {
-    const { id } = await context.params;
-    const result = await fetchAuthQuery(api.rfs.get, {
-      rfsId: id as Id<"rfs">,
-    });
-    return Response.json(result);
-  } catch (error) {
-    return errorResponseFrom(error);
-  }
+  return retiredApiResponse({ replacementMethod: "GET", replacementPath: `/api/v2/rfs/${(await context.params).id}`, message: "The unversioned RFS representation is retired. Read its policy-v2 contract." });
 }

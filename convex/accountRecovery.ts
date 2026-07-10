@@ -1,6 +1,8 @@
 import { ConvexError, v } from "convex/values";
 
 import { internalMutation, mutation } from "./_generated/server";
+import { recordOperatorAudit } from "./lib/operatorAudit";
+import { sha256Digest } from "./lib/contracts";
 import { requireActiveRole, requirePrincipal, requireRecentPasskey } from "./lib/principals";
 import { verifyWalletSignature, walletMessageDigest } from "./lib/walletProof";
 
@@ -19,6 +21,12 @@ export const createRecoveryChallenge = mutation({
     if (!wallet || wallet.principalId !== args.principalId || wallet.status === "revoked") {
       throw new ConvexError({ code: "NOT_FOUND", message: "Eligible recovery wallet not found." });
     }
+    const active = await ctx.db
+      .query("accountRecoveryChallenges")
+      .withIndex("by_principal_and_state", (query) => query.eq("principalId", args.principalId).eq("state", "pending"))
+      .collect();
+    const reusable = active.find((challenge) => challenge.walletId === wallet._id && challenge.expiresAt > Date.now());
+    if (reusable) return { challengeId: reusable._id, challenge: reusable.challenge, expiresAt: reusable.expiresAt };
     const createdAt = Date.now();
     const expiresAt = createdAt + CHALLENGE_TTL_MS;
     const challengeId = await ctx.db.insert("accountRecoveryChallenges", {
@@ -52,7 +60,7 @@ export const proveRecoveryWallet = mutation({
     challenge: v.string(),
     signature: v.string(),
   },
-  returns: v.object({ requestId: v.id("accountRecoveryRequests"), coolingOffUntil: v.number() }),
+  returns: v.object({ requestId: v.id("accountRecoveryRequests"), coolingOffUntil: v.number(), statusToken: v.string() }),
   handler: async (ctx, args) => {
     const challenge = await ctx.db.get(args.challengeId);
     if (!challenge || challenge.state !== "pending" || challenge.expiresAt <= Date.now()) {
@@ -82,7 +90,7 @@ export const proveRecoveryWallet = mutation({
       )
       .first();
     if (active) {
-      return { requestId: active._id, coolingOffUntil: active.coolingOffUntil };
+      return { requestId: active._id, coolingOffUntil: active.coolingOffUntil, statusToken: active.walletProofDigest };
     }
     const createdAt = Date.now();
     const coolingOffUntil = createdAt + RECOVERY_COOLING_MS;
@@ -95,12 +103,22 @@ export const proveRecoveryWallet = mutation({
       createdAt,
     });
     await ctx.db.patch(challenge._id, { state: "consumed", consumedAt: createdAt });
-    return { requestId, coolingOffUntil };
+    return { requestId, coolingOffUntil, statusToken: challenge.challengeDigest };
+  },
+});
+
+export const getRecoveryStatus = mutation({
+  args: { requestId: v.id("accountRecoveryRequests"), statusToken: v.string() },
+  returns: v.union(v.null(), v.object({ status: v.string(), coolingOffUntil: v.number(), approvalCount: v.number(), completedAt: v.optional(v.number()), revokedKeyCount: v.optional(v.number()) })),
+  handler: async (ctx, args) => {
+    const request = await ctx.db.get(args.requestId);
+    if (!request || request.walletProofDigest !== args.statusToken) return null;
+    return { status: request.status, coolingOffUntil: request.coolingOffUntil, approvalCount: Number(Boolean(request.firstOperatorPrincipalId)) + Number(Boolean(request.secondOperatorPrincipalId)), completedAt: request.completedAt, revokedKeyCount: request.revokedKeyCount };
   },
 });
 
 export const approveRecovery = mutation({
-  args: { requestId: v.id("accountRecoveryRequests") },
+  args: { requestId: v.id("accountRecoveryRequests"), expectedDigest: v.string() },
   returns: v.object({ approvalCount: v.number(), coolingOffUntil: v.number(), ready: v.boolean() }),
   handler: async (ctx, args) => {
     const operator = await requirePrincipal(ctx);
@@ -113,6 +131,8 @@ export const approveRecovery = mutation({
     if (!request || request.status === "rejected" || request.status === "completed") {
       throw new ConvexError({ code: "NOT_FOUND", message: "Active recovery request not found." });
     }
+    const digest = sha256Digest({ id: String(request._id), status: request.status, coolingOffUntil: request.coolingOffUntil, firstOperatorPrincipalId: request.firstOperatorPrincipalId ?? null, secondOperatorPrincipalId: request.secondOperatorPrincipalId ?? null });
+    if (args.expectedDigest !== digest) throw new ConvexError({ code: "STALE_RESOURCE", message: "The recovery request changed; refresh and confirm its current digest." });
     if (request.principalId === operator.principalId) {
       throw new ConvexError({ code: "FORBIDDEN", message: "Recovery subject cannot approve their own request." });
     }
@@ -128,6 +148,7 @@ export const approveRecovery = mutation({
       ...patch,
       status: ready ? "approved" : request.status,
     });
+    await recordOperatorAudit(ctx, { actorPrincipalId: operator.principalId, action: "recovery.approve", targetType: "accountRecoveryRequest", targetId: String(request._id), reason: "Independent recovery approval", metadata: { approvalCount, coolingOffUntil: request.coolingOffUntil, ready } });
     return { approvalCount, coolingOffUntil: request.coolingOffUntil, ready };
   },
 });
@@ -189,6 +210,7 @@ export const finalizeApprovedRecovery = internalMutation({
       completedAt: now,
       revokedKeyCount,
     });
+    await recordOperatorAudit(ctx, { actorPrincipalId: "system:recovery", action: "recovery.finalize", targetType: "accountRecoveryRequest", targetId: String(request._id), reason: "Cooling-off elapsed and two independent approvals were present", metadata: { revokedKeyCount } });
     return { revokedKeyCount, status: "completed" as const };
   },
 });

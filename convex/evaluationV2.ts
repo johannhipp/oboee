@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { acceptanceQuorum, harmfulHold, reductionQuorum, type EvaluationSignal } from "./lib/evaluationPolicy";
+import { acceptanceQuorum, harmfulHold, nextReviewAssignmentFee, reductionQuorum, type EvaluationSignal } from "./lib/evaluationPolicy";
 import { calculateCriterionDecision, POLICY_V2, baseUnits, type ContractCriterion, type CriterionResult } from "./lib/policy";
 import { getOrCreatePrincipalCluster, requireActiveRole, requirePrincipal, requireRecentPasskey } from "./lib/principals";
 import { emitFinalRfsReputation } from "./reputation";
@@ -60,9 +60,8 @@ const openReviewAssignment = async (
   const existing = await ctx.db.query("reviewAssignments").withIndex("by_assessment", (query) => query.eq("assessmentId", args.assessment._id)).collect();
   const active = existing.find((item) => item.reason === args.reason && (item.state === "open" || item.state === "accepted"));
   if (active) return active._id;
-  const committed = existing.filter((item) => item.state === "accepted" || item.state === "completed").reduce((sum, item) => sum + item.reserveFeeBaseUnits, BigInt(0));
   const reserve = args.rfs.reviewReserveBaseUnits ?? BigInt(0);
-  const fee = reserve > committed ? reserve - committed : BigInt(0);
+  const fee = nextReviewAssignmentFee(reserve, existing);
   return await ctx.db.insert("reviewAssignments", {
     rfsId: args.rfs._id,
     assessmentId: args.assessment._id,
@@ -341,9 +340,57 @@ export const listReviewAssignments = query({
   returns: v.any(),
   handler: async (ctx) => {
     const principal = await requirePrincipal(ctx);
+    await requireActiveRole(ctx, { principalId: principal.principalId, role: "trusted_reviewer" });
     const assigned = await ctx.db.query("reviewAssignments").withIndex("by_reviewer_and_state", (query) => query.eq("reviewerPrincipalId", principal.principalId)).collect();
     const open = await ctx.db.query("reviewAssignments").withIndex("by_state_and_dueAt", (query) => query.eq("state", "open")).collect();
     return [...assigned, ...open];
+  },
+});
+
+export const getReviewAssignment = query({
+  args: { assignmentId: v.id("reviewAssignments") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const principal = await requirePrincipal(ctx);
+    const assignment = await ctx.db.get(args.assignmentId);
+    if (!assignment) return null;
+    await requireActiveRole(ctx, { principalId: principal.principalId, role: "trusted_reviewer", requiredTags: assignment.tags });
+    if (assignment.reviewerPrincipalId && assignment.reviewerPrincipalId !== principal.principalId) return null;
+    const [rfs, assessment] = await Promise.all([ctx.db.get(assignment.rfsId), ctx.db.get(assignment.assessmentId)]);
+    if (!rfs || !assessment || !rfs.currentRevisionId) return null;
+    const [revision, criteria, version, evidence] = await Promise.all([
+      ctx.db.get(rfs.currentRevisionId),
+      ctx.db.query("rfsCriteria").withIndex("by_revision", (query) => query.eq("revisionId", rfs.currentRevisionId!)).collect(),
+      ctx.db.get(assessment.skillVersionId),
+      ctx.db.query("evidenceArtifacts").withIndex("by_rfs", (query) => query.eq("rfsId", rfs._id)).collect(),
+    ]);
+    return {
+      assignment: { assignmentId: assignment._id, reason: assignment.reason, tags: assignment.tags, dueAt: assignment.dueAt, reserveFeeBaseUnits: assignment.reserveFeeBaseUnits, state: assignment.state, conflictDeclared: assignment.conflictDeclared ?? false },
+      rfs: { rfsId: rfs._id, title: rfs.title, description: rfs.description, scope: rfs.scope, targetEnvironments: revision?.targetEnvironments ?? [], contractDigest: rfs.contractDigest, status: rfs.status },
+      revision: revision ? { revisionId: revision._id, revisionNumber: revision.revisionNumber, contractDigest: revision.contractDigest } : null,
+      criteria: criteria.map((criterion) => ({ criterionId: criterion._id, criterionKey: criterion.criterionKey, title: criterion.title, passConditionKind: criterion.passConditionKind, passCondition: criterion.passCondition, verificationMethod: criterion.verificationMethod, weightBps: criterion.weightBps, requiredForPublication: criterion.requiredForPublication })),
+      skillVersion: version ? { skillVersionId: version._id, version: version.version, contentHash: version.contentHash, summary: version.summary, status: version.status, quarantineState: version.quarantineState } : null,
+      evidence: evidence.filter((artifact) => !artifact.deletedAt).map((artifact) => ({ artifactId: artifact._id, criterionId: artifact.criterionId, classification: artifact.classification, publicRedaction: artifact.publicRedaction, plaintextSha256: artifact.plaintextSha256, verificationState: artifact.verificationState, scanState: artifact.scanState, mimeType: artifact.mimeType, sizeBytes: artifact.sizeBytes, downloadHref: `/api/v2/evidence/${String(artifact._id)}/download` })),
+    };
+  },
+});
+
+export const listAdjudicationQueue = query({
+  args: {},
+  returns: v.any(),
+  handler: async (ctx) => {
+    const principal = await requirePrincipal(ctx);
+    await requireActiveRole(ctx, { principalId: principal.principalId, role: "security_adjudicator" });
+    const [open, assigned] = await Promise.all([
+      ctx.db.query("disputes").withIndex("by_state_and_dueAt", (query) => query.eq("state", "open")).collect(),
+      ctx.db.query("disputes").withIndex("by_assignedPrincipal_and_state", (query) => query.eq("assignedPrincipalId", principal.principalId).eq("state", "assigned")).collect(),
+    ]);
+    return await Promise.all([...open, ...assigned].map(async (dispute) => {
+      const rfs = await ctx.db.get(dispute.rfsId);
+      const criteria = rfs?.currentRevisionId ? await ctx.db.query("rfsCriteria").withIndex("by_revision", (query) => query.eq("revisionId", rfs.currentRevisionId!)).collect() : [];
+      const events = await ctx.db.query("disputeEvents").withIndex("by_dispute", (query) => query.eq("disputeId", dispute._id)).collect();
+      return { disputeId: dispute._id, rfsId: dispute.rfsId, rfsTitle: rfs?.title ?? "Unavailable RFS", triggerType: dispute.triggerType, state: dispute.state, dueAt: dispute.dueAt, stickyHold: dispute.stickyHold, criteria: criteria.map((criterion) => ({ criterionId: criterion._id, title: criterion.title, weightBps: criterion.weightBps, passCondition: criterion.passCondition })), evidence: events.flatMap((event) => event.evidenceArtifactIds.map((artifactId) => ({ artifactId, publicRedaction: event.publicRedaction ?? "Evidence supplied for adjudication." }))) };
+    }));
   },
 });
 
@@ -428,5 +475,148 @@ export const getWorkspace = query({
     const version = skill?.publishedVersionId ? await ctx.db.get(skill.publishedVersionId) : skill ? (await ctx.db.query("skillVersions").withIndex("by_skill", (query) => query.eq("skillId", skill._id)).order("desc").first()) : null;
     const criteria = rfs.currentRevisionId ? await ctx.db.query("rfsCriteria").withIndex("by_revision", (query) => query.eq("revisionId", rfs.currentRevisionId!)).collect() : [];
     return { rfsId: rfs._id, skillVersion: version, criteria, role: eligible.role };
+  },
+});
+
+export const listPublic = query({
+  args: { rfsId: v.id("rfs") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db.query("evaluationEvents").withIndex("by_rfs", (query) => query.eq("rfsId", args.rfsId)).collect();
+    return await Promise.all(rows.map(async (row) => ({
+      evaluationId: row._id, skillVersionId: row.skillVersionId, reviewerRole: row.reviewerType,
+      rating: row.rating || undefined, outcome: row.outcome, reviewText: row.reviewText,
+      supersedesEvaluationId: row.supersedesEvaluationId, active: row.active !== false,
+      createdAt: row.createdAt,
+      criteria: (await ctx.db.query("evaluationCriterionResults").withIndex("by_evaluation", (query) => query.eq("evaluationId", row._id)).collect()).map((result) => ({ criterionId: result.criterionId, result: result.result, verifierState: result.verifierState, artifactIds: result.artifactIds })),
+    })));
+  },
+});
+
+export const listDisputes = query({
+  args: { rfsId: v.id("rfs") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requirePrincipal(ctx);
+    return await ctx.db.query("disputes").filter((query) => query.eq(query.field("rfsId"), args.rfsId)).collect();
+  },
+});
+
+const assertVerifiedDisputeEvidence = async (
+  ctx: MutationCtx,
+  rfsId: Id<"rfs">,
+  artifactIds: Id<"evidenceArtifacts">[],
+) => {
+  if (artifactIds.length === 0 || new Set(artifactIds.map(String)).size !== artifactIds.length) {
+    throw new ConvexError({ code: "VERIFIED_EVIDENCE_REQUIRED", message: "At least one unique verified evidence artifact is required." });
+  }
+  const artifacts = await Promise.all(artifactIds.map(async (artifactId) => await ctx.db.get(artifactId)));
+  if (artifacts.some((artifact) => !artifact || artifact.rfsId !== rfsId || artifact.verificationState !== "verified" || artifact.scanState !== "clean" || artifact.deletedAt)) {
+    throw new ConvexError({ code: "INVALID_EVIDENCE_SCOPE", message: "Dispute evidence must be clean, verified, retained, and bound to this RFS." });
+  }
+};
+
+const isRfsStakeholder = async (ctx: MutationCtx, rfs: Doc<"rfs">, principalId: string) => {
+  if (rfs.authorUserId === principalId || rfs.claimantUserId === principalId) return true;
+  const contributions = await ctx.db.query("contributions").withIndex("by_rfs", (query) => query.eq("rfsId", rfs._id)).collect();
+  return contributions.some((contribution) => contribution.status === "accepted" && contribution.backerUserId === principalId);
+};
+
+export const openAppeal = mutation({
+  args: {
+    rfsId: v.id("rfs"),
+    evidenceArtifactIds: v.array(v.id("evidenceArtifacts")),
+    rationale: v.string(),
+    publicRedaction: v.string(),
+  },
+  returns: v.id("disputes"),
+  handler: async (ctx, args) => {
+    const principal = await requirePrincipal(ctx);
+    const rfs = await ctx.db.get(args.rfsId);
+    if (!rfs || rfs.policyVersion !== POLICY_V2.version) throw new ConvexError({ code: "NOT_FOUND", message: "Policy-v2 RFS not found." });
+    if (!(await isRfsStakeholder(ctx, rfs, principal.principalId))) throw new ConvexError({ code: "FORBIDDEN", message: "Only the requester, selected author, or a funding backer may appeal." });
+    if (!args.rationale.trim() || !args.publicRedaction.trim()) throw new ConvexError({ code: "REDACTION_REQUIRED", message: "Private rationale and a public redaction are required." });
+    await assertVerifiedDisputeEvidence(ctx, rfs._id, args.evidenceArtifactIds);
+    const assessment = await ctx.db.query("payoutAssessments").withIndex("by_rfs", (query) => query.eq("rfsId", rfs._id)).unique();
+    if (!assessment || assessment.status === "claimed" || assessment.workflowStatus === "finalized") throw new ConvexError({ code: "INVALID_STATE", message: "The current payout is no longer appealable." });
+    const active = (await ctx.db.query("disputes").withIndex("by_rfs_and_state", (query) => query.eq("rfsId", rfs._id)).collect()).find((dispute) => dispute.state !== "resolved");
+    if (active) throw new ConvexError({ code: "CONFLICT", message: "An active dispute already holds this RFS." });
+    const disputeId = await ctx.db.insert("disputes", {
+      rfsId: rfs._id,
+      assessmentId: assessment._id,
+      triggerType: "appeal",
+      openedByPrincipalId: principal.principalId,
+      state: "open",
+      stickyHold: true,
+      dueAt: Date.now() + POLICY_V2.humanDisputeSloMs,
+      createdAt: Date.now(),
+    });
+    await ctx.db.patch(assessment._id, {
+      status: "disputed",
+      workflowStatus: "human_review",
+      assessmentReason: "stakeholder_appeal",
+      resourceVersion: (assessment.resourceVersion ?? 1) + 1,
+    });
+    await ctx.db.patch(rfs._id, { status: "disputed", resourceVersion: (rfs.resourceVersion ?? 1) + 1 });
+    const [skill, version] = await Promise.all([ctx.db.get(assessment.skillId), ctx.db.get(assessment.skillVersionId)]);
+    if (skill) await ctx.db.patch(skill._id, { quarantineState: "held", status: "disputed" });
+    if (version) await ctx.db.patch(version._id, { quarantineState: "held", status: "disputed" });
+    await ctx.db.insert("disputeEvents", {
+      disputeId,
+      actorPrincipalId: principal.principalId,
+      eventType: "opened",
+      nextState: "open",
+      evidenceArtifactIds: args.evidenceArtifactIds,
+      rationale: args.rationale.trim(),
+      publicRedaction: args.publicRedaction.trim(),
+      occurredAt: Date.now(),
+    });
+    await openReviewAssignment(ctx, { rfs, assessment, reason: "appeal" });
+    return disputeId;
+  },
+});
+
+export const appendDisputeEvidence = mutation({
+  args: {
+    disputeId: v.id("disputes"),
+    evidenceArtifactIds: v.array(v.id("evidenceArtifacts")),
+    rationale: v.string(),
+    publicRedaction: v.string(),
+  },
+  returns: v.id("disputeEvents"),
+  handler: async (ctx, args) => {
+    const principal = await requirePrincipal(ctx);
+    const dispute = await ctx.db.get(args.disputeId);
+    if (!dispute || dispute.state === "resolved") throw new ConvexError({ code: "INVALID_STATE", message: "Active dispute not found." });
+    const rfs = await ctx.db.get(dispute.rfsId);
+    if (!rfs) throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
+    const stakeholder = await isRfsStakeholder(ctx, rfs, principal.principalId);
+    if (!stakeholder && dispute.assignedPrincipalId !== principal.principalId) throw new ConvexError({ code: "FORBIDDEN", message: "Only a stakeholder or assigned adjudicator may add evidence." });
+    if (!args.rationale.trim() || !args.publicRedaction.trim()) throw new ConvexError({ code: "REDACTION_REQUIRED", message: "Private rationale and a public redaction are required." });
+    await assertVerifiedDisputeEvidence(ctx, rfs._id, args.evidenceArtifactIds);
+    return await ctx.db.insert("disputeEvents", {
+      disputeId: dispute._id,
+      actorPrincipalId: principal.principalId,
+      eventType: "evidence_added",
+      priorState: dispute.state,
+      nextState: dispute.state,
+      evidenceArtifactIds: args.evidenceArtifactIds,
+      rationale: args.rationale.trim(),
+      publicRedaction: args.publicRedaction.trim(),
+      occurredAt: Date.now(),
+    });
+  },
+});
+
+export const listEvents = query({
+  args: { rfsId: v.id("rfs") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const [assessment, disputes] = await Promise.all([
+      ctx.db.query("assessmentEvents").withIndex("by_rfs", (query) => query.eq("rfsId", args.rfsId)).collect(),
+      ctx.db.query("disputes").filter((query) => query.eq(query.field("rfsId"), args.rfsId)).collect(),
+    ]);
+    const disputeEvents = (await Promise.all(disputes.map(async (dispute) => await ctx.db.query("disputeEvents").withIndex("by_dispute", (query) => query.eq("disputeId", dispute._id)).collect()))).flat();
+    return [...assessment.map((event) => ({ type: "assessment", occurredAt: event.occurredAt, state: event.nextState, reason: event.reason })), ...disputeEvents.map((event) => ({ type: "dispute", occurredAt: event.occurredAt, state: event.nextState, reason: event.publicRedaction ?? event.eventType }))].sort((left, right) => left.occurredAt - right.occurredAt);
   },
 });

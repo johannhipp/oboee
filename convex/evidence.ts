@@ -1,5 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519";
 import { hexToBytes, utf8ToBytes } from "@noble/hashes/utils";
+import { makeFunctionReference } from "convex/server";
 import { ConvexError, v } from "convex/values";
 
 import {
@@ -7,8 +8,9 @@ import {
   evidenceUploadAuthorizationPayload,
 } from "../shared/authorization-envelope";
 import { verifyServerEnvelope } from "../shared/server-envelope";
-import type { Doc } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { internalAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { scannerState } from "./lib/evidencePolicy";
 import { POLICY_V2 } from "./lib/policy";
 import { requireActiveRole, requirePrincipal } from "./lib/principals";
 
@@ -22,6 +24,7 @@ const safeMimeTypes = new Set([
   "text/markdown",
   "text/plain",
 ]);
+const scanRef = makeFunctionReference<"action", { artifactId: Id<"evidenceArtifacts"> }, null>("evidence:scanArtifact");
 
 const serverSecret = () => {
   const secret = process.env.OBOE_SERVER_ENVELOPE_SECRET?.trim();
@@ -116,19 +119,102 @@ export const finalizeUpload = mutation({
       retentionDeleteAt: now + POLICY_V2.evidenceRetentionMs, legalHold: false, createdAt: now,
     });
     await ctx.db.patch(intent._id, { state: "uploaded", storageId: args.storageId });
+    await ctx.scheduler.runAfter(0, scanRef, { artifactId });
     return artifactId;
   },
 });
 
 export const recordVerification = internalMutation({
-  args: { artifactId: v.id("evidenceArtifacts"), verifierPrincipalId: v.string(), verified: v.boolean(), scanState: v.union(v.literal("clean"), v.literal("quarantined"), v.literal("failed")) },
+  args: { artifactId: v.id("evidenceArtifacts"), verifierPrincipalId: v.string(), verified: v.boolean() },
   returns: v.string(),
   handler: async (ctx, args) => {
     const artifact = await ctx.db.get(args.artifactId);
     if (!artifact || artifact.deletedAt) return "unchanged";
     await requireActiveRole(ctx, { principalId: args.verifierPrincipalId, role: "trusted_reviewer" });
-    await ctx.db.patch(artifact._id, { scanState: args.scanState, verificationState: args.verified && args.scanState === "clean" ? "verified" : "failed", verifiedByPrincipalId: args.verifierPrincipalId, verifiedAt: Date.now() });
-    return args.verified && args.scanState === "clean" ? "verified" : "failed";
+    if (args.verified && artifact.scanState !== "clean") throw new ConvexError({ code: "SCANNER_CLEARANCE_REQUIRED", message: "Scanner clearance is required before verification." });
+    await ctx.db.patch(artifact._id, { verificationState: args.verified ? "verified" : "failed", verifiedByPrincipalId: args.verifierPrincipalId, verifiedAt: Date.now() });
+    return args.verified ? "verified" : "failed";
+  },
+});
+
+export const getScanInput = internalQuery({
+  args: { artifactId: v.id("evidenceArtifacts") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const artifact = await ctx.db.get(args.artifactId);
+    if (!artifact || artifact.deletedAt || artifact.scanState !== "pending") return null;
+    const storageUrl = await ctx.storage.getUrl(artifact.ciphertextStorageId);
+    if (!storageUrl) return null;
+    return { artifactId: artifact._id, storageUrl, wrappedDataKey: artifact.wrappedDataKey, nonce: artifact.nonce, authenticationTag: artifact.authenticationTag, kmsKeyVersion: artifact.kmsKeyVersion, ciphertextSha256: artifact.ciphertextSha256, plaintextSha256: artifact.plaintextSha256, mimeType: artifact.mimeType, sizeBytes: artifact.sizeBytes };
+  },
+});
+
+export const recordScanResult = internalMutation({
+  args: { artifactId: v.id("evidenceArtifacts"), state: v.union(v.literal("clean"), v.literal("quarantined"), v.literal("failed")), reportReference: v.optional(v.string()), reason: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const artifact = await ctx.db.get(args.artifactId);
+    if (!artifact || artifact.deletedAt || artifact.scanState !== "pending") return null;
+    await ctx.db.patch(artifact._id, { scanState: args.state, scanReportReference: args.reportReference, scanReason: args.reason });
+    await ctx.db.insert("evidenceAccessEvents", { artifactId: artifact._id, actorPrincipalId: "system:scanner", action: "scan", reason: args.reason, result: args.state === "clean" ? "completed" : "failed", occurredAt: Date.now() });
+    return null;
+  },
+});
+
+type ScanInput = { artifactId: Id<"evidenceArtifacts">; storageUrl: string; wrappedDataKey: string; nonce: string; authenticationTag: string; kmsKeyVersion: string; ciphertextSha256: string; plaintextSha256: string; mimeType: string; sizeBytes: number } | null;
+const scanInputRef = makeFunctionReference<"query", { artifactId: Id<"evidenceArtifacts"> }, ScanInput>("evidence:getScanInput");
+const scanResultRef = makeFunctionReference<"mutation", { artifactId: Id<"evidenceArtifacts">; state: "clean" | "quarantined" | "failed"; reportReference?: string; reason: string }, null>("evidence:recordScanResult");
+
+export const scanArtifact = internalAction({
+  args: { artifactId: v.id("evidenceArtifacts") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const input = await ctx.runQuery(scanInputRef, args);
+    if (!input) return null;
+    const url = process.env.OBOE_SCANNER_URL?.trim();
+    const token = process.env.OBOE_SCANNER_AUTH_TOKEN?.trim();
+    if (!url || !token) {
+      await ctx.runMutation(scanResultRef, { artifactId: args.artifactId, state: "failed", reason: "scanner_not_configured" });
+      return null;
+    }
+    try {
+      const response = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(input) });
+      const result = await response.json() as Record<string, unknown>;
+      if (!response.ok || typeof result.malwareDetected !== "boolean" || typeof result.contentTypeMatches !== "boolean" || typeof result.reportReference !== "string" || !result.reportReference) throw new Error("scanner_response_invalid");
+      const state = scannerState({ malwareDetected: result.malwareDetected, contentTypeMatches: result.contentTypeMatches, reportReference: result.reportReference });
+      await ctx.runMutation(scanResultRef, { artifactId: args.artifactId, state, reportReference: result.reportReference, reason: state === "clean" ? "scanner_clear" : "scanner_quarantine" });
+    } catch {
+      await ctx.runMutation(scanResultRef, { artifactId: args.artifactId, state: "failed", reason: "scanner_request_failed" });
+    }
+    return null;
+  },
+});
+
+export const verifyAssignedArtifact = mutation({
+  args: {
+    assignmentId: v.id("reviewAssignments"),
+    artifactId: v.id("evidenceArtifacts"),
+    outcome: v.union(v.literal("verified"), v.literal("failed")),
+    reason: v.string(),
+  },
+  returns: v.object({ verificationState: v.string(), scanState: v.string() }),
+  handler: async (ctx, args) => {
+    const reviewer = await requirePrincipal(ctx);
+    const assignment = await ctx.db.get(args.assignmentId);
+    if (!assignment || assignment.reviewerPrincipalId !== reviewer.principalId || assignment.state !== "accepted") {
+      throw new ConvexError({ code: "FORBIDDEN", message: "An accepted reviewer assignment is required." });
+    }
+    await requireActiveRole(ctx, { principalId: reviewer.principalId, role: "trusted_reviewer", requiredTags: assignment.tags });
+    const artifact = await ctx.db.get(args.artifactId);
+    if (!artifact || artifact.deletedAt || artifact.rfsId !== assignment.rfsId || artifact.ownerPrincipalId === reviewer.principalId) {
+      throw new ConvexError({ code: "INVALID_EVIDENCE_SCOPE", message: "Artifact is unavailable for independent verification." });
+    }
+    if (!args.reason.trim()) throw new ConvexError({ code: "RATIONALE_REQUIRED", message: "A verification reason is required." });
+    if (args.outcome === "verified" && artifact.scanState !== "clean") throw new ConvexError({ code: "SCANNER_CLEARANCE_REQUIRED", message: "The independent scanner must clear this artifact before reviewer verification." });
+    const verificationState = args.outcome;
+    await ctx.db.patch(artifact._id, { verificationState, verifiedByPrincipalId: reviewer.principalId, verifiedAt: Date.now() });
+    await ctx.db.insert("evidenceAccessEvents", { artifactId: artifact._id, actorPrincipalId: reviewer.principalId, action: "grant", reason: `verification:${args.reason.trim()}`, result: "completed", occurredAt: Date.now() });
+    return { verificationState, scanState: artifact.scanState };
   },
 });
 

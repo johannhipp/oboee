@@ -256,6 +256,20 @@ export const getRfsSettlement = query({
     const assessment = await ctx.db.query("payoutAssessments").withIndex("by_rfs", (query) => query.eq("rfsId", args.rfsId)).first();
     if (!assessment) return null;
     const obligations = await ctx.db.query("settlementObligations").withIndex("by_source", (query) => query.eq("sourceType", "rfs_work").eq("sourceId", String(assessment._id))).collect();
-    return { assessment, obligations: obligations.map((item) => ({ kind: item.kind, amountBaseUnits: item.amountBaseUnits, state: item.state })) };
+    return {
+      assessment: {
+        status: assessment.status,
+        workflowStatus: assessment.workflowStatus,
+        decisionKind: assessment.decisionKind,
+        passedWeightBps: assessment.passedWeightBps,
+        grossAmountBaseUnits: assessment.grossAmountBaseUnits,
+        finalPayoutBaseUnits: assessment.finalPayoutBaseUnits,
+        platformFeeBaseUnits: assessment.platformFeeBaseUnits,
+        refundPoolBaseUnits: assessment.refundPoolBaseUnits,
+        assessmentReason: assessment.assessmentReason,
+        decidedAt: assessment.decidedAt,
+      },
+      obligations: obligations.map((item) => ({ kind: item.kind, amountBaseUnits: item.amountBaseUnits, state: item.state })),
+    };
   },
 });

@@ -1,0 +1,9 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+export function ModerationControls({ reviewId }: { reviewId: string }) {
+  const router = useRouter(); const [message, setMessage] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  return <form className="mt-4 grid gap-3" onSubmit={async (event) => { event.preventDefault(); setBusy(true); const fields = new FormData(event.currentTarget); try { const response = await fetch(`/api/v2/review-moderation/${reviewId}`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ resolution: fields.get("resolution"), publicRationale: fields.get("publicRationale") }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message ?? "Moderation failed."); router.refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : "Moderation failed."); } finally { setBusy(false); } }}><label className="text-sm">Resolution<select name="resolution" className="mt-1 w-full border border-border bg-background px-3 py-2"><option value="uphold">uphold</option><option value="clear_harm">clear harmful classification</option><option value="remove">remove review</option></select></label><label className="text-sm">Public rationale<textarea required name="publicRationale" rows={2} className="mt-1 w-full border border-border bg-background p-3" /></label><label className="flex items-center gap-2 text-sm"><input required type="checkbox" />I reviewed the evidence and have no conflict.</label><button disabled={busy} className="w-fit border border-foreground px-4 py-2 font-mono text-xs">resolve with recent passkey</button>{message ? <p role="status" className="text-sm">{message}</p> : null}</form>;
+}

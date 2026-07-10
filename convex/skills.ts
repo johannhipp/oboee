@@ -13,6 +13,8 @@ import {
   getLatestSkillVersion,
   userBackedRfs,
 } from "./lib/helpers";
+import { POLICY_V2 } from "./lib/policy";
+import { retirePolicyV1 } from "./lib/legacy";
 
 const catalogStatusValidator = v.union(
   v.literal("open"),
@@ -90,6 +92,7 @@ const searchMatches = (queryText: string, fields: string[]) => {
   return fields.some((field) => field.toLowerCase().includes(queryText));
 };
 
+/** @deprecated Mixed policy-v1 detail is retired. Use skills.getPublic and v2 routes. */
 export const get = query({
   args: {
     skillId: v.optional(v.id("skills")),
@@ -110,6 +113,7 @@ export const get = query({
     canClaimPayout: v.boolean(),
   }),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/skills/{skillId}");
     if (!args.skillId && !args.rfsId) {
       throw new ConvexError({
         code: "INVALID_ARGUMENT",
@@ -245,6 +249,7 @@ export const get = query({
   },
 });
 
+/** @deprecated Mixed policy-v1 catalog is retired. Use reputation.catalog and v2 routes. */
 export const list = query({
   args: {
     status: v.optional(catalogStatusValidator),
@@ -254,6 +259,7 @@ export const list = query({
   },
   returns: v.array(catalogItemValidator),
   handler: async (ctx, args) => {
+    retirePolicyV1("GET /api/v2/catalog");
     const normalizedQuery = args.q?.trim().toLowerCase() ?? "";
     const requiredTags = cleanTags(args.tags ?? []);
     const statusFilter = args.status;
@@ -351,5 +357,67 @@ export const list = query({
         return true;
       })
       .sort((a, b) => b.createdAt - a.createdAt);
+  },
+});
+
+export const getVersionMetadata = query({
+  args: { skillId: v.id("skills"), skillVersionId: v.id("skillVersions") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const [skill, version] = await Promise.all([ctx.db.get(args.skillId), ctx.db.get(args.skillVersionId)]);
+    if (!skill || !version || version.skillId !== skill._id || version.status !== "published") return null;
+    return { skillId: skill._id, skillVersionId: version._id, version: version.version, contentHash: version.contentHash, digestAlgorithm: version.digestAlgorithm, summary: version.summary, tags: version.tags, purchasePriceBaseUnits: version.purchasePriceBaseUnits, quarantineState: version.quarantineState ?? "clear", publishedAt: version.publishedAt };
+  },
+});
+
+export const getPublic = query({
+  args: { skillId: v.id("skills") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const skill = await ctx.db.get(args.skillId);
+    if (!skill || skill.policyVersion !== POLICY_V2.version || !skill.publishedVersionId) return null;
+    const [version, rfs, profile, qualityRows, installs, reviews] = await Promise.all([
+      ctx.db.get(skill.publishedVersionId),
+      ctx.db.get(skill.rfsId),
+      ctx.db.query("publicProfiles").withIndex("by_principal", (query) => query.eq("principalId", skill.authorUserId)).unique(),
+      ctx.db.query("skillQualitySnapshots").filter((query) => query.eq(query.field("skillVersionId"), skill.publishedVersionId!)).collect(),
+      ctx.db.query("installEvents").withIndex("by_skillVersion", (query) => query.eq("skillVersionId", skill.publishedVersionId!)).collect(),
+      ctx.db.query("postUseReviews").withIndex("by_skill_and_state", (query) => query.eq("skillId", skill._id)).collect(),
+    ]);
+    if (!version || !rfs) return null;
+    const quality = qualityRows.find((snapshot) => snapshot.tag === "general") ?? qualityRows.sort((left, right) => right.independentCount - left.independentCount)[0];
+    const clusters = new Set(installs.filter((install) => install.adoptionWeightBps > 0).map((install) => String(install.identityClusterId)));
+    return {
+      skillId: skill._id,
+      skillVersionId: version._id,
+      rfsId: rfs._id,
+      title: rfs.title,
+      summary: version.summary,
+      tags: version.tags,
+      authorHandle: profile?.handle ?? "verified-author",
+      version: version.version,
+      contentHash: version.contentHash,
+      digestAlgorithm: version.digestAlgorithm,
+      purchasePriceBaseUnits: version.purchasePriceBaseUnits,
+      quarantineState: version.quarantineState ?? skill.quarantineState ?? "clear",
+      status: version.status,
+      publishedAt: version.publishedAt,
+      quality: quality ? { score: quality.score, adjustedScore: quality.adjustedScore, confidence: quality.confidence, independentCount: quality.independentCount, computedAt: quality.computedAt } : null,
+      uniqueVerifiedInstalls: clusters.size,
+      reviews: reviews.filter((review) => review.state !== "removed").map((review) => ({ reviewId: review._id, rating: review.rating, outcome: review.outcome, tags: review.tags, text: review.text, state: review.state, createdAt: review.createdAt })),
+    };
+  },
+});
+
+export const getInstallAggregate = query({
+  args: { skillId: v.id("skills") },
+  returns: v.object({ uniqueVerifiedInstalls: v.number(), weightedAdoptionUnits: v.number() }),
+  handler: async (ctx, args) => {
+    const skill = await ctx.db.get(args.skillId);
+    if (!skill?.publishedVersionId) return { uniqueVerifiedInstalls: 0, weightedAdoptionUnits: 0 };
+    const installs = await ctx.db.query("installEvents").withIndex("by_skillVersion", (query) => query.eq("skillVersionId", skill.publishedVersionId!)).collect();
+    const byCluster = new Map<string, number>();
+    for (const install of installs) byCluster.set(String(install.identityClusterId), Math.max(byCluster.get(String(install.identityClusterId)) ?? 0, install.adoptionWeightBps));
+    return { uniqueVerifiedInstalls: [...byCluster.values()].filter((weight) => weight > 0).length, weightedAdoptionUnits: [...byCluster.values()].reduce((sum, weight) => sum + weight / 10_000, 0) };
   },
 });

@@ -1,150 +1,26 @@
-import type { Metadata } from "next"
-import Link from "next/link"
-import { api } from "../../../convex/_generated/api"
-import { fetchAuthQuery, getAuthenticationStatus, convexUnavailableMessage } from "@/lib/auth-server"
-import { CopyText } from "@/components/copy-text"
-import { AsciiBox } from "@/components/ascii-box"
-import { RFSRow } from "@/components/rfs-row"
-import { DataToast, ProfileSkeleton } from "@/components/data-fallback"
-import { baseUnitsToNumber } from "@/lib/view-models"
+import { anyApi } from "convex/server";
 
-export const dynamic = "force-dynamic"
+import { fetchAuthQuery, getAuthenticationStatus } from "@/lib/auth-server";
+import { WorkspaceState } from "@/components/workspace-state";
+import { toJsonValue } from "@/lib/json";
 
-export const metadata: Metadata = { title: "Profile | Oboe" }
+export const dynamic = "force-dynamic";
 
-export default async function ProfilePage() {
-  const authStatus = await getAuthenticationStatus()
+const rows = (value: unknown) => Array.isArray(value) ? value : [];
 
-  if (authStatus === "unavailable") {
-    return (
-      <main className="max-w-3xl mx-auto px-4 py-8">
-        <DataToast message={convexUnavailableMessage()} />
-        <ProfileSkeleton />
-      </main>
-    )
-  }
-
-  if (authStatus === "unauthenticated") {
-    return (
-      <main className="max-w-3xl mx-auto px-4 py-16">
-        <AsciiBox title="auth required">
-          <p className="text-sm text-muted-foreground font-mono">
-            <Link href="/sign-in?next=%2Fme" className="underline underline-offset-2 text-foreground">
-              sign in
-            </Link>{" "}
-            to view your profile, requests, contributions, and purchases.
-          </p>
-        </AsciiBox>
-      </main>
-    )
-  }
-
-  let dataUnavailable = false
-  let dashboard: Awaited<typeof api.users.getDashboard._returnType> | null = null
-
-  try {
-    dashboard = await fetchAuthQuery(api.users.getDashboard, {})
-  } catch {
-    dataUnavailable = true
-  }
-
-  if (!dashboard) {
-    return (
-      <main className="max-w-3xl mx-auto px-4 py-8">
-        <DataToast message={convexUnavailableMessage()} />
-        <ProfileSkeleton />
-      </main>
-    )
-  }
-
-  return (
-    <main className="max-w-3xl mx-auto px-4">
-      {dataUnavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
-      <div className="mt-8 mb-6">
-        <h1 className="text-xl font-medium tracking-tight">{dashboard.user.name}</h1>
-        {dashboard.user.walletAddress ? (
-          <CopyText text={dashboard.user.walletAddress} className="mt-1" />
-        ) : (
-          <p className="font-mono text-sm text-muted-foreground mt-1">no wallet linked yet</p>
-        )}
-      </div>
-
-      <div className="mt-6">
-        <AsciiBox title="my requests">
-          {dashboard.requests.length > 0 ? (
-            dashboard.requests.map((rfs) => (
-              <RFSRow
-                key={rfs.id}
-                rfs={{
-                  id: rfs.id,
-                  title: rfs.title,
-                  description: "",
-                  scope: "",
-                  fundingThreshold: baseUnitsToNumber(rfs.fundingThresholdBaseUnits),
-                  currentAmount: baseUnitsToNumber(rfs.currentAmountBaseUnits),
-                  status: rfs.status,
-                  authorId: dashboard.user.id,
-                  claimantId: null,
-                  createdAt: new Date().toISOString(),
-                  authorLabel: "you",
-                }}
-              />
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground font-mono italic">
-              no requests yet
-            </p>
-          )}
-        </AsciiBox>
-      </div>
-
-      <div className="mt-6">
-        <AsciiBox title="contributions">
-          {dashboard.contributions.length > 0 ? (
-            dashboard.contributions.map((contrib) => {
-              return (
-                <div
-                  key={contrib.id}
-                  className="flex items-center justify-between py-1.5 font-mono text-sm gap-4 min-w-0"
-                >
-                  <span className="truncate min-w-0">{contrib.rfsTitle}</span>
-                  <span className="text-muted-foreground ml-4 shrink-0">
-                    ${baseUnitsToNumber(contrib.amountBaseUnits).toFixed(2)}
-                  </span>
-                </div>
-              )
-            })
-          ) : (
-            <p className="text-sm text-muted-foreground font-mono italic">
-              no contributions yet
-            </p>
-          )}
-        </AsciiBox>
-      </div>
-
-      <div className="mt-6">
-        <AsciiBox title="purchased">
-          {dashboard.purchases.length > 0 ? (
-            dashboard.purchases.map((purchase) => {
-              return (
-                <div
-                  key={purchase.id}
-                  className="flex items-center justify-between py-1.5 font-mono text-sm gap-4 min-w-0"
-                >
-                  <span className="truncate min-w-0">{purchase.skillTitle}</span>
-                  <span className="text-muted-foreground ml-4 shrink-0">
-                    ${baseUnitsToNumber(purchase.amountBaseUnits).toFixed(3)}
-                  </span>
-                </div>
-              )
-            })
-          ) : (
-            <p className="text-sm text-muted-foreground font-mono italic">
-              no purchases yet
-            </p>
-          )}
-        </AsciiBox>
-      </div>
-    </main>
-  )
+export default async function WorkPage() {
+  const auth = await getAuthenticationStatus();
+  if (auth !== "authenticated") return <WorkspaceState title="Account workspace" message={auth === "unavailable" ? "The account backend is unavailable." : "Sign in to resume active work."} signInPath={auth === "unauthenticated" ? "/me" : undefined} />;
+  let work: Record<string, unknown> | null = null;
+  try { work = toJsonValue(await fetchAuthQuery(anyApi.workspace.myWork, {})) as Record<string, unknown>; } catch { /* Render the explicit unavailable state below. */ }
+  if (!work) return <WorkspaceState title="Active work" message="Active work could not be loaded." />;
+  const sections = [
+    ["humanActions", "Human decisions", "Waiting for your passkey-confirmed decision."],
+    ["obligations", "Money and transfer risks", "Unsettled obligations and transfer state."],
+    ["reviewAssignments", "Review assignments", "Trusted review work with deadlines."],
+    ["assigned", "Assigned fulfillment", "Requests you are responsible for delivering."],
+    ["applications", "Applications", "Active, selected, and waitlisted applications."],
+    ["requested", "Requested work", "Requests you created that are still active."],
+  ] as const;
+  return <main><h1 className="text-xl font-medium">Active work</h1><p className="mt-1 text-sm text-muted-foreground">Risk and deadlines are ordered before archive history.</p><div className="mt-6 space-y-8">{sections.map(([key, title, description]) => { const items = rows(work?.[key]); return <section key={key}><div className="flex items-end justify-between border-b border-border pb-2"><div><h2 className="font-medium">{title}</h2><p className="text-xs text-muted-foreground">{description}</p></div><span className="font-mono text-xs">{items.length}</span></div>{items.map((item, index) => <pre key={index} className="overflow-x-auto border-b border-border py-3 font-mono text-xs leading-5">{JSON.stringify(item, null, 2)}</pre>)}{items.length === 0 ? <p className="py-4 text-sm text-muted-foreground">Nothing active.</p> : null}</section>; })}</div></main>;
 }

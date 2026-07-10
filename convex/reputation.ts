@@ -11,6 +11,7 @@ import {
   recencyBps,
 } from "./lib/reputationPolicy";
 import { basisPoints, POLICY_V2 } from "./lib/policy";
+import { recordPrincipalActivity } from "./lib/activity";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -61,6 +62,10 @@ export const emitFinalRfsReputation = async (
     for (const tag of evaluation.vulnerabilityTags.length ? evaluation.vulnerabilityTags : args.rfs.tags) {
       await insertReputationEvent(ctx, { subjectType: "reviewer_tag", subjectId: evaluation.principalId ?? evaluation.reviewerIdentityId, tag, sourceType: "reviewer_accuracy", sourceId: String(evaluation._id), finalDecisionId: String(args.assessment._id), score: evaluation.outcome === "harmful" && args.decisionKind !== "harmful" ? 0 : score, signalStrength: 1, identityClusterId: evaluation.identityClusterId!, occurredAt: args.assessment.decidedAt ?? Date.now(), policyVersion: POLICY_V2.version });
     }
+  }
+  await recordPrincipalActivity(ctx, { principalId: args.skillVersion.authorUserId, role: "author", resourceType: "skillVersion", resourceId: String(args.skillVersion._id), eventType: "reputation_finalized", publicSummary: `Final ${args.decisionKind} decision updated skill and author reputation.` });
+  for (const reviewerId of new Set(evaluations.map((evaluation) => evaluation.principalId ?? evaluation.reviewerIdentityId))) {
+    await recordPrincipalActivity(ctx, { principalId: reviewerId, role: "reviewer", resourceType: "skillVersion", resourceId: String(args.skillVersion._id), eventType: "reviewer_reputation_finalized", publicSummary: "A final decision updated reviewer calibration." });
   }
 };
 
@@ -181,7 +186,19 @@ export const publicAuthor = query({
   handler: async (ctx, args) => {
     const profile = await ctx.db.query("publicProfiles").withIndex("by_handle", (query) => query.eq("handle", args.handle)).unique();
     if (!profile) return null;
-    const reputation = await ctx.db.query("authorReputationSnapshots").filter((query) => query.eq(query.field("principalId"), profile.principalId)).collect();
-    return { handle: profile.handle, displayName: profile.displayName, bio: profile.bio, links: profile.links, reputation };
+    const [reputation, sources] = await Promise.all([
+      ctx.db.query("authorReputationSnapshots").filter((query) => query.eq(query.field("principalId"), profile.principalId)).collect(),
+      ctx.db.query("reputationEvents").filter((query) => query.and(query.eq(query.field("subjectType"), "author_tag"), query.eq(query.field("subjectId"), profile.principalId))).take(100),
+    ]);
+    const skills = await ctx.db.query("skills").filter((query) => query.eq(query.field("authorUserId"), profile.principalId)).collect();
+    return {
+      handle: profile.handle,
+      displayName: profile.displayName,
+      bio: profile.bio,
+      links: profile.links,
+      reputation: reputation.map((snapshot) => ({ tag: snapshot.tag, score: snapshot.score, adjustedScore: snapshot.adjustedScore, confidence: snapshot.confidence, independentCount: snapshot.independentCount, computedAt: snapshot.computedAt, algorithmVersion: snapshot.algorithmVersion })),
+      sourceSummaries: sources.sort((left, right) => right.occurredAt - left.occurredAt).map((source) => ({ tag: source.tag, sourceType: source.sourceType, sourceId: source.sourceId, finalDecisionId: source.finalDecisionId, score: source.score, signalStrengthClass: source.signalStrength >= 0.75 ? "strong" : source.signalStrength >= 0.4 ? "medium" : "light", ageDays: Math.max(0, Math.floor((Date.now() - source.occurredAt) / DAY_MS)), occurredAt: source.occurredAt })),
+      publishedSkills: skills.filter((skill) => skill.status === "published" && skill.publishedVersionId).map((skill) => ({ skillId: skill._id, rfsId: skill.rfsId, summary: skill.summary, tags: skill.tags, publishedVersionId: skill.publishedVersionId })),
+    };
   },
 });

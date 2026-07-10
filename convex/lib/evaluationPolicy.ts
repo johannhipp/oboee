@@ -10,6 +10,16 @@ export interface EvaluationSignal {
   criterionResults: Readonly<Record<string, "passed" | "failed" | "not_run">>;
 }
 
+export const nextReviewAssignmentFee = (
+  reviewReserveBaseUnits: bigint,
+  assignments: readonly { state: string; reserveFeeBaseUnits: bigint }[],
+) => {
+  const committed = assignments
+    .filter((assignment) => assignment.state === "open" || assignment.state === "accepted" || assignment.state === "completed")
+    .reduce((sum, assignment) => sum + assignment.reserveFeeBaseUnits, BigInt(0));
+  return reviewReserveBaseUnits > committed ? reviewReserveBaseUnits - committed : BigInt(0);
+};
+
 const clusterRepresentatives = (signals: readonly EvaluationSignal[]) => {
   const byCluster = new Map<string, EvaluationSignal>();
   for (const signal of signals) {

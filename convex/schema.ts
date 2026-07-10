@@ -436,6 +436,21 @@ export default defineSchema({
     .index("by_owner", ["ownerPrincipalId"])
     .index("by_manifestSha256", ["manifestSha256"]),
 
+  fixtureUploadIntents: defineTable({
+    principalId: v.string(),
+    visibility: v.union(v.literal("public"), v.literal("restricted")),
+    manifestSha256: v.string(),
+    bundleSha256: v.string(),
+    environmentContract: v.string(),
+    maximumBytes: v.number(),
+    state: v.union(v.literal("issued"), v.literal("finalized"), v.literal("expired")),
+    storageId: v.optional(v.id("_storage")),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_principal_and_state", ["principalId", "state"])
+    .index("by_state_and_expiresAt", ["state", "expiresAt"]),
+
   rfsApplications: defineTable({
     rfsId: v.id("rfs"),
     principalId: v.string(),
@@ -719,6 +734,20 @@ export default defineSchema({
     .index("by_principal_and_role", ["principalId", "role"])
     .index("by_role_and_activeUntil", ["role", "activeUntil"]),
 
+  operatorAuditEvents: defineTable({
+    actorPrincipalId: v.string(),
+    action: v.string(),
+    targetType: v.string(),
+    targetId: v.string(),
+    reason: v.string(),
+    requestDigest: v.string(),
+    result: v.union(v.literal("completed"), v.literal("denied"), v.literal("failed")),
+    metadataJson: v.string(),
+    occurredAt: v.number(),
+  })
+    .index("by_actor_and_occurredAt", ["actorPrincipalId", "occurredAt"])
+    .index("by_target_and_occurredAt", ["targetType", "targetId", "occurredAt"]),
+
   identityRiskSignals: defineTable({
     principalId: v.string(),
     signalType: v.union(
@@ -821,6 +850,8 @@ export default defineSchema({
     resultResourceId: v.optional(v.string()),
     operationId: v.optional(v.id("apiOperations")),
     errorCode: v.optional(v.string()),
+    state: v.optional(v.union(v.literal("pending"), v.literal("completed"), v.literal("failed"))),
+    resultJson: v.optional(v.string()),
     expiresAt: v.number(),
     createdAt: v.number(),
   })
@@ -844,6 +875,16 @@ export default defineSchema({
   })
     .index("by_principal_and_status", ["principalId", "status"])
     .index("by_resource", ["resourceType", "resourceId"]),
+
+  apiRateLimits: defineTable({
+    principalId: v.string(),
+    action: v.string(),
+    windowStartedAt: v.number(),
+    count: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_principal_action_window", ["principalId", "action", "windowStartedAt"])
+    .index("by_expiresAt", ["expiresAt"]),
 
   activityEvents: defineTable({
     principalId: v.string(),
@@ -885,6 +926,8 @@ export default defineSchema({
     restrictionReason: v.optional(v.union(v.literal("private_source"), v.literal("live_exploit"), v.literal("credentials"), v.literal("coordinated_disclosure"))),
     verificationState: v.union(v.literal("submitted"), v.literal("verified"), v.literal("failed"), v.literal("expired")),
     scanState: v.union(v.literal("pending"), v.literal("clean"), v.literal("quarantined"), v.literal("failed")),
+    scanReportReference: v.optional(v.string()),
+    scanReason: v.optional(v.string()),
     plaintextSha256: v.string(),
     ciphertextSha256: v.string(),
     ciphertextStorageId: v.id("_storage"),
@@ -913,7 +956,7 @@ export default defineSchema({
   evidenceAccessEvents: defineTable({
     artifactId: v.id("evidenceArtifacts"),
     actorPrincipalId: v.string(),
-    action: v.union(v.literal("grant"), v.literal("read"), v.literal("failed_read"), v.literal("redact"), v.literal("delete"), v.literal("legal_hold")),
+    action: v.union(v.literal("grant"), v.literal("read"), v.literal("failed_read"), v.literal("redact"), v.literal("delete"), v.literal("legal_hold"), v.literal("scan")),
     reason: v.string(),
     result: v.union(v.literal("allowed"), v.literal("denied"), v.literal("completed"), v.literal("failed")),
     occurredAt: v.number(),
@@ -1234,6 +1277,19 @@ export default defineSchema({
     reason: v.string(),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
+
+  policyShadowComparisons: defineTable({
+    rfsId: v.id("rfs"),
+    legacyFirstApplicationId: v.id("rfsApplications"),
+    policyV2ApplicationId: v.id("rfsApplications"),
+    diverged: v.boolean(),
+    legacySubmittedAt: v.number(),
+    policyV2ScoreBps: v.optional(v.number()),
+    comparedAt: v.number(),
+    algorithmVersion: v.number(),
+  })
+    .index("by_rfs", ["rfsId"])
+    .index("by_diverged_and_comparedAt", ["diverged", "comparedAt"]),
 
   migrationProgress: defineTable({
     migrationKey: v.string(),

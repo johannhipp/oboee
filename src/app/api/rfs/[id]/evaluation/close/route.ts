@@ -1,33 +1,5 @@
-import { api } from "../../../../../../../convex/_generated/api";
-import type { Id } from "../../../../../../../convex/_generated/dataModel";
-import { fetchAuthMutation, isAuthenticated } from "@/lib/auth-server";
+import { retiredApiResponse } from "@/lib/api-v2/legacy-routes";
 
-import { errorResponse, errorResponseFrom } from "../../../../_lib/responses";
-
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await isAuthenticated())) {
-    return errorResponse("UNAUTHORIZED", "Authentication required.", 401);
-  }
-
-  try {
-    const body = (await request.json().catch(() => ({}))) as { force?: unknown };
-    const { id } = await context.params;
-    const result = await fetchAuthMutation(api.evaluations.closeEvaluation, {
-      rfsId: id as Id<"rfs">,
-      force: body.force === true,
-    });
-
-    return Response.json({
-      status: "ok",
-      resourceType: "payoutAssessment",
-      resourceId: result.rfsId,
-      nextState: result.nextState,
-      assessmentStatus: result.assessmentStatus,
-      qualityMultiplierBps: result.qualityMultiplierBps,
-      finalPayoutBaseUnits: result.finalPayoutBaseUnits.toString(),
-      assessmentReason: result.assessmentReason,
-    });
-  } catch (error) {
-    return errorResponseFrom(error);
-  }
+export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
+  return retiredApiResponse({ replacementMethod: "GET", replacementPath: `/api/v2/rfs/${(await context.params).id}/settlement`, message: "Manual policy-v1 evaluation closure is retired. Policy-v2 lifecycle jobs finalize eligible assessments; read settlement state here." });
 }

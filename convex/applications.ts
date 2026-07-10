@@ -442,7 +442,20 @@ export const listForRfs = query({
     const principal = await requirePrincipal(ctx);
     const rfs = await ctx.db.get(args.rfsId);
     const rows = await ctx.db.query("rfsApplications").filter((query) => query.eq(query.field("rfsId"), args.rfsId)).collect();
-    if (rfs?.authorUserId === principal.principalId) return rows;
-    return rows.filter((row) => row.principalId === principal.principalId);
+    if (rfs?.authorUserId === principal.principalId) return rows.map((row) => ({ ...row, viewerCanEdit: row.principalId === principal.principalId }));
+    return rows.filter((row) => row.principalId === principal.principalId).map((row) => ({ ...row, viewerCanEdit: true }));
+  },
+});
+
+export const getAssignment = query({
+  args: { rfsId: v.id("rfs") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const principal = await requirePrincipal(ctx);
+    const rfs = await ctx.db.get(args.rfsId);
+    if (!rfs || !rfs.selectedApplicationId) return null;
+    const application = await ctx.db.get(rfs.selectedApplicationId);
+    if (!application || (rfs.authorUserId !== principal.principalId && application.principalId !== principal.principalId)) return null;
+    return { rfsId: rfs._id, applicationId: application._id, state: application.state, principalId: application.principalId === principal.principalId ? application.principalId : undefined, scoreSnapshotJson: application.scoreSnapshotJson, totalScoreBps: application.totalScoreBps, rank: application.rank, bondRequired: application.bondRequired, deliveryDeadline: rfs.deliveryDeadline };
   },
 });

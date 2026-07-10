@@ -1,205 +1,115 @@
-import type { Metadata } from "next"
-import { fetchQuery } from "convex/nextjs"
-import type { FunctionReturnType } from "convex/server"
-import { api } from "../../../../convex/_generated/api"
-import type { Id } from "../../../../convex/_generated/dataModel"
-import { AsciiBox } from "@/components/ascii-box"
-import { ProgressBar } from "@/components/progress-bar"
-import { StatusBadge } from "@/components/status-badge"
-import { RfsActions } from "@/components/rfs-actions"
-import { CopyId } from "@/components/copy-id"
-import { DataToast, DetailSkeleton, SkeletonRows } from "@/components/data-fallback"
-import { baseUnitsToNumber } from "@/lib/view-models"
-import { convexUnavailableMessage } from "@/lib/auth-server"
+import type { Metadata } from "next";
+import Link from "next/link";
+import { anyApi } from "convex/server";
+import { fetchQuery } from "convex/nextjs";
 
-export const dynamic = "force-dynamic"
+import { CopyBox } from "@/components/copy-box";
+import { DataToast } from "@/components/data-fallback";
+import { RfsFundingAction, SkillPurchaseAction } from "@/components/payment-action";
+import { StatusBadge } from "@/components/status-badge";
+import { convexUnavailableMessage } from "@/lib/auth-server";
+import { rfsCapabilities, skillCapabilities } from "@/lib/api-v2/capabilities";
+import { resourceHandoff } from "@/lib/handoff";
+import { buildPublicRfsReadModel, buildPublicSkillReadModel } from "@/lib/read-models/public";
 
-type SkillDetail = FunctionReturnType<typeof api.skills.get>
-type Contributions = FunctionReturnType<typeof api.rfs.listContributions>
+export const dynamic = "force-dynamic";
 
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ id: string }>
-}): Promise<Metadata> {
-  const { id } = await params
+const loadResource = async (id: string) => {
   try {
-    const detail = await fetchQuery(api.skills.get, { rfsId: id as Id<"rfs"> })
-    return { title: detail.rfs ? `${detail.rfs.title} | Oboe` : "Not found | Oboe" }
+    const rfs = await fetchQuery(anyApi.rfsV2.get, { rfsId: id });
+    if (rfs) return { kind: "rfs" as const, data: buildPublicRfsReadModel(rfs) };
   } catch {
-    return { title: "Oboe" }
+    // The opaque ID may belong to the skill table.
   }
+  try {
+    const skill = await fetchQuery(anyApi.skills.getPublic, { skillId: id });
+    if (skill) return { kind: "skill" as const, data: buildPublicSkillReadModel(skill) };
+  } catch {
+    // The caller receives one neutral unavailable/not-found state below.
+  }
+  return null;
+};
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const resource = await loadResource(id);
+  const title = resource ? (resource.kind === "rfs" ? resource.data.rfs.title : resource.data.title) : "Marketplace item";
+  return { title: `${title} | Oboe`, alternates: { canonical: `/browse/${id}` } };
 }
 
-export default async function Page({
-  params,
-}: {
-  params: Promise<{ id: string }>
-}) {
-  const { id } = await params
-  const rfsId = id as Id<"rfs">
+const Definition = ({ label, value }: { label: string; value?: React.ReactNode }) => value === undefined || value === null ? null : (
+  <div className="grid gap-1 border-b border-border py-2 sm:grid-cols-[11rem_1fr]">
+    <dt className="font-mono text-xs text-muted-foreground">{label}</dt><dd className="min-w-0 break-words text-sm">{value}</dd>
+  </div>
+);
 
-  let contributionsUnavailable = false
-  let detail: SkillDetail | null = null
-  let contributions: Contributions = []
+export default async function MarketplaceDetail({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const resource = await loadResource(id);
+  if (!resource) return <div className="mx-auto max-w-4xl py-10"><DataToast message={convexUnavailableMessage()} /><p className="mt-8 text-sm text-muted-foreground">This policy-v2 resource is unavailable or does not exist.</p></div>;
 
-  try {
-    detail = await fetchQuery(api.skills.get, { rfsId })
-  } catch {
-    // Detail stays null; render a page skeleton below instead of crashing.
-  }
-
-  if (!detail) {
+  if (resource.kind === "skill") {
+    const skill = resource.data;
+    const purchase = skillCapabilities(skill.id, skill.versionId, skill.quarantineState === "clear").find((item) => item.action === "purchase")!;
     return (
-      <div className="my-8">
-        <DataToast message={convexUnavailableMessage()} />
-        <DetailSkeleton />
-      </div>
-    )
+      <article className="mx-auto max-w-4xl py-8">
+        {skill.quarantineState !== "clear" ? <div role="alert" className="mb-5 border-2 border-red-700 bg-red-50 p-4 text-sm text-red-900"><strong className="block font-mono uppercase">{skill.quarantineState}</strong>This version must not be purchased or executed until the hold is resolved.</div> : null}
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <div>
+            <div className="flex flex-wrap items-center gap-3"><span className="font-mono text-xs uppercase text-muted-foreground">skill v{skill.version}</span><StatusBadge status={skill.status} /></div>
+            <h1 className="mt-2 text-2xl font-medium">{skill.title}</h1>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">{skill.summary}</p>
+            <dl className="mt-6">
+              <Definition label="author" value={<Link href={`/authors/${skill.authorHandle}`} className="underline">@{skill.authorHandle}</Link>} />
+              <Definition label="content digest" value={<code>{skill.digestAlgorithm}:{skill.contentHash}</code>} />
+              <Definition label="price" value={`${skill.purchasePriceBaseUnits} base units`} />
+              <Definition label="verified installs" value={skill.uniqueVerifiedInstalls} />
+              <Definition label="quality" value={skill.quality ? `${skill.quality.adjustedScore.toFixed(3)} · ${skill.quality.confidence} · ${skill.quality.independentCount} independent` : "provisional · no finalized evidence"} />
+              <Definition label="published" value={skill.publishedAt ? new Date(skill.publishedAt).toLocaleString() : "pending"} />
+            </dl>
+            <h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Public post-use reviews</h2>
+            {skill.reviews.map((review) => <div key={review.reviewId} className="border-b border-border py-4"><div className="flex justify-between gap-3 font-mono text-xs"><Link href={`/reviews/${review.reviewId}`} className="underline">{review.rating}/5 · {review.outcome}</Link><span>{review.state}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{review.text}</p></div>)}
+            {skill.reviews.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No public reviews yet.</p> : null}
+          </div>
+          <aside><h2 className="mb-2 font-mono text-xs uppercase text-muted-foreground">Use with an agent</h2><CopyBox text={resourceHandoff({ kind: "skill", id: skill.id, versionId: skill.versionId })} /><SkillPurchaseAction capability={purchase} skillVersionId={skill.versionId} /><Link href={`/browse/${skill.rfsId}`} className="mt-4 inline-block font-mono text-xs underline">source RFS</Link></aside>
+        </div>
+      </article>
+    );
   }
 
-  try {
-    contributions = await fetchQuery(api.rfs.listContributions, { rfsId })
-  } catch {
-    contributionsUnavailable = true
-  }
-
-  const rfs = detail.rfs
-
-  if (!rfs) {
-    return (
-      <div className="py-16 text-center text-muted-foreground font-mono text-sm">
-        rfs not found
-      </div>
-    )
-  }
-
-  const skill = detail.skill
-  const currentAmount = baseUnitsToNumber(rfs.currentAmountBaseUnits)
-  const fundingThreshold = baseUnitsToNumber(rfs.fundingThresholdBaseUnits)
-  const latestSkillVersion = detail.latestSkillVersion
-  const payoutAssessment = detail.payoutAssessment
-
+  const detail = resource.data;
+  const rfs = detail.rfs;
+  const fund = rfsCapabilities(rfs.id, rfs.status).find((item) => item.action === "fund")!;
   return (
-    <div className="my-8">
-      {contributionsUnavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
-      <div className="flex flex-col lg:flex-row gap-8">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-medium tracking-tight break-words">{rfs.title}</h1>
-          <div className="mt-2">
-            <StatusBadge status={rfs.status} />
-          </div>
-          <div className="text-sm font-mono mt-1 flex items-center gap-1">
-            <span className="text-muted-foreground">by</span>
-            <CopyId id={rfs.authorUserId} className="text-sm" />
-          </div>
-
-          <AsciiBox title="scope" className="mt-6">
-            <p className="text-sm leading-relaxed break-words">{rfs.scope}</p>
-            <p className="text-sm leading-relaxed mt-2 break-words">{rfs.description}</p>
-          </AsciiBox>
-
-          {latestSkillVersion ? (
-            <AsciiBox title="evaluation" className="mt-6">
-              <div className="space-y-2 text-sm leading-relaxed">
-                <p className="font-mono text-xs text-muted-foreground">
-                  version {latestSkillVersion.version} · {latestSkillVersion.contentHash}
-                </p>
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={latestSkillVersion.status} />
-                  {payoutAssessment ? <StatusBadge status={payoutAssessment.status} /> : null}
-                </div>
-                <p className="text-xs font-mono text-muted-foreground">
-                  {detail.evaluationCount} evaluation{detail.evaluationCount === 1 ? "" : "s"} submitted · window closes{" "}
-                  {new Date(latestSkillVersion.evaluationDeadline).toLocaleString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </p>
-                {payoutAssessment ? (
-                  <p className="text-xs text-muted-foreground">{payoutAssessment.assessmentReason}</p>
-                ) : null}
-              </div>
-            </AsciiBox>
-          ) : null}
-
-          <AsciiBox title="evaluation policy" className="mt-6">
-            <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
-              <p>Evaluators must submit evidence from actually trying the skill. Star ratings alone do not affect payout.</p>
-              <p>A single negative review can open a dispute or hold payout, but cannot reduce or block payout by itself.</p>
-              <p>Reduced or blocked payout requires independent, evidence-backed corroboration. Reputation updates only after final resolution.</p>
-            </div>
-          </AsciiBox>
+    <article className="mx-auto max-w-4xl py-8">
+      {detail.submission && detail.submission.quarantineState !== "clear" ? <div role="alert" className="mb-5 border-2 border-red-700 bg-red-50 p-4 text-sm text-red-900"><strong className="block font-mono uppercase">Submission {detail.submission.quarantineState}</strong>Publication, purchase, and payout remain held pending independent resolution.</div> : null}
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div>
+          <div className="flex flex-wrap items-center gap-3"><span className="font-mono text-xs uppercase text-muted-foreground">RFS · policy {rfs.policyVersion}</span><StatusBadge status={rfs.status} /></div>
+          <h1 className="mt-2 text-2xl font-medium">{rfs.title}</h1>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{rfs.description}</p>
+          <h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Contract</h2>
+          <dl>
+            <Definition label="requester" value={<Link href={`/authors/${rfs.authorHandle}`} className="underline">@{rfs.authorHandle}</Link>} />
+            <Definition label="scope" value={rfs.scope} />
+            <Definition label="environments" value={detail.revision?.targetEnvironments.join(", ")} />
+            <Definition label="work escrow" value={`${rfs.workEscrowBaseUnits ?? "0"} base units`} />
+            <Definition label="review reserve" value={`${rfs.reviewReserveBaseUnits ?? "0"} base units`} />
+            <Definition label="funded / target" value={`${rfs.fundedBaseUnits} / ${rfs.totalFundingTargetBaseUnits ?? "0"} base units`} />
+            <Definition label="contract digest" value={<code>{rfs.contractDigest ?? "draft"}</code>} />
+            <Definition label="funding deadline" value={rfs.fundingDeadline ? new Date(rfs.fundingDeadline).toLocaleString() : undefined} />
+            <Definition label="application deadline" value={rfs.applicationDeadline ? new Date(rfs.applicationDeadline).toLocaleString() : undefined} />
+            <Definition label="delivery deadline" value={rfs.deliveryDeadline ? new Date(rfs.deliveryDeadline).toLocaleString() : undefined} />
+          </dl>
+          <h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Acceptance criteria</h2>
+          <div className="overflow-x-auto"><table className="w-full min-w-[40rem] text-left text-sm"><thead className="font-mono text-xs text-muted-foreground"><tr><th className="py-2">criterion</th><th>pass condition</th><th>verification</th><th className="text-right">weight</th></tr></thead><tbody>{detail.criteria.map((criterion) => <tr key={criterion.criterionId} className="border-t border-border align-top"><td className="py-3 pr-4"><div className="font-medium">{criterion.title}</div>{criterion.requiredForPublication ? <span className="font-mono text-[10px] text-red-700">required</span> : null}</td><td className="py-3 pr-4">{criterion.passCondition}</td><td className="py-3 pr-4">{criterion.verificationMethod}</td><td className="py-3 text-right font-mono">{(criterion.weightBps / 100).toFixed(2)}%</td></tr>)}</tbody></table></div>
+          {detail.assessment ? <><h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Assessment</h2><dl><Definition label="workflow" value={detail.assessment.workflowStatus} /><Definition label="decision" value={detail.assessment.decisionKind ?? detail.assessment.status} /><Definition label="passed weight" value={detail.assessment.passedWeightBps === undefined ? undefined : `${(detail.assessment.passedWeightBps / 100).toFixed(2)}%`} /><Definition label="reason" value={detail.assessment.assessmentReason} /></dl></> : null}
+          <h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Public evidence</h2>
+          {detail.publicEvidence.map((artifact) => <div key={artifact.artifactId} className="border-b border-border py-3 text-sm"><div className="flex flex-wrap justify-between gap-2 font-mono text-xs"><span>{artifact.verificationState} · {artifact.scanState} · {artifact.classification}</span><span>{artifact.mimeType} · {artifact.sizeBytes} bytes</span></div><p className="mt-2">{artifact.publicRedaction ?? "No public narrative supplied."}</p></div>)}
+          {detail.publicEvidence.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No public evidence submitted.</p> : null}
         </div>
-
-        <div className="lg:w-72 lg:shrink-0 lg:sticky lg:top-20 lg:self-start">
-          <AsciiBox title="funding">
-            <ProgressBar current={currentAmount} goal={fundingThreshold} />
-
-            <div className="mt-4 space-y-1 text-sm font-mono text-muted-foreground">
-              <p>{contributions.length} backers</p>
-              <p>
-                created{" "}
-                {new Date(rfs._creationTime).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </p>
-            </div>
-
-            <RfsActions
-              rfsId={rfs._id}
-              status={rfs.status}
-              canFund={detail.canFund}
-              canClaim={detail.canClaim}
-              canBuy={detail.canBuy}
-              canEvaluate={detail.canEvaluate}
-              canRevise={detail.canRevise}
-              canClaimPayout={detail.canClaimPayout}
-              skillId={skill?._id}
-              hasSkill={Boolean(skill)}
-              latestSkillVersion={
-                latestSkillVersion
-                  ? {
-                      id: latestSkillVersion._id,
-                      version: latestSkillVersion.version,
-                      contentHash: latestSkillVersion.contentHash,
-                      status: latestSkillVersion.status,
-                      evaluationDeadline: latestSkillVersion.evaluationDeadline,
-                    }
-                  : undefined
-              }
-              payoutAssessment={payoutAssessment}
-            />
-
-            <div className="mt-4 border-t border-border pt-3">
-              <h3 className="text-xs font-mono uppercase text-muted-foreground mb-2">
-                backers
-              </h3>
-              {contributionsUnavailable ? (
-                <SkeletonRows count={3} />
-              ) : (
-                contributions.slice(0, 3).map((c) => {
-                  return (
-                    <div key={c.id} className="flex justify-between font-mono text-sm">
-                      <CopyId id={c.backerUserId} className="text-sm" />
-                      <span>${baseUnitsToNumber(c.amountBaseUnits).toFixed(2)}</span>
-                    </div>
-                  )
-                })
-              )}
-              {!contributionsUnavailable && contributions.length === 0 ? (
-                <p className="text-xs text-muted-foreground font-mono">
-                  no backers yet
-                </p>
-              ) : null}
-            </div>
-          </AsciiBox>
-        </div>
+        <aside><h2 className="mb-2 font-mono text-xs uppercase text-muted-foreground">Send to agent</h2><CopyBox text={resourceHandoff({ kind: "rfs", id: rfs.id })} /><RfsFundingAction capability={fund} minimumBaseUnits="1" />{detail.submission ? <Link className="mt-4 inline-block font-mono text-xs underline" href={`/browse/${detail.submission.skillId}`}>published skill</Link> : null}</aside>
       </div>
-    </div>
-  )
+    </article>
+  );
 }

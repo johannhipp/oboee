@@ -41,6 +41,12 @@ export const ensureMyPrincipal = mutation({
   },
 });
 
+export const getMyPrincipalId = query({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => (await requirePrincipal(ctx)).principalId,
+});
+
 export const createWalletChallenge = mutation({
   args: {
     address: v.string(),

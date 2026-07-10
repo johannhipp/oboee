@@ -22,6 +22,7 @@ import {
   type MarketplacePermission,
 } from "./lib/authorization";
 import { baseUnits } from "./lib/policy";
+import { transitionHumanActionOperations } from "./lib/apiOperationTransitions";
 import { requirePrincipal, requireRecentPasskey, type PrincipalContext } from "./lib/principals";
 
 const AUTHORIZATION_ENVELOPE_TTL_MS = 5 * 60 * 1_000;
@@ -241,6 +242,41 @@ export const registerPrivilegedSession = mutation({
   },
 });
 
+export const registerVerifiedPasskeySession = mutation({
+  args: {
+    principalId: v.string(),
+    sessionId: v.string(),
+    authenticatedAt: v.number(),
+    envelopeSignature: v.string(),
+  },
+  returns: v.id("privilegedSessionAttestations"),
+  handler: async (ctx, args) => {
+    assertFreshEnvelope(args.authenticatedAt);
+    const payload = privilegedSessionPayload(args);
+    if (!verifyServerEnvelope(serverEnvelopeSecret(), payload, args.envelopeSignature)) {
+      throw new ConvexError({ code: "INVALID_ENVELOPE", message: "Passkey-verification envelope is invalid." });
+    }
+    const existing = await ctx.db
+      .query("privilegedSessionAttestations")
+      .withIndex("by_sessionId", (query) => query.eq("sessionId", args.sessionId))
+      .unique();
+    if (existing && existing.principalId !== args.principalId) {
+      throw new ConvexError({ code: "CONFLICT", message: "Session attestation belongs to another principal." });
+    }
+    if (existing && existing.authenticatedAt >= args.authenticatedAt) return existing._id;
+    if (existing) await ctx.db.delete(existing._id);
+    return await ctx.db.insert("privilegedSessionAttestations", {
+      principalId: args.principalId,
+      sessionId: args.sessionId,
+      authenticationMethod: "passkey",
+      authenticatedAt: args.authenticatedAt,
+      expiresAt: args.authenticatedAt + PRIVILEGED_SESSION_TTL_MS,
+      authorizationDigest: digest(payload),
+      createdAt: Date.now(),
+    });
+  },
+});
+
 export const requestDelegationApproval = mutation({
   args: delegationBoundsValidator,
   returns: v.object({ requestId: v.id("humanActionRequests"), payloadDigest: v.string(), expiresAt: v.number() }),
@@ -282,12 +318,14 @@ export const resolveMyHumanAction = mutation({
       throw new ConvexError({ code: "INVALID_STATE", message: "Human action request is no longer pending." });
     }
     const status = args.approve ? "approved" : "declined";
+    const resolvedAt = Date.now();
     await ctx.db.patch(request._id, {
       status,
       resolvedByPrincipalId: principal.principalId,
       resolvedSessionId: principal.sessionId,
-      resolvedAt: Date.now(),
+      resolvedAt,
     });
+    await transitionHumanActionOperations(ctx, request._id, status, resolvedAt);
     return status;
   },
 });
@@ -485,5 +523,16 @@ export const listMyDelegations = query({
       status: row.status,
       expiresAt: row.expiresAt,
     }));
+  },
+});
+
+export const getMyHumanAction = query({
+  args: { actionId: v.id("humanActionRequests") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const principal = await requirePrincipal(ctx);
+    const action = await ctx.db.get(args.actionId);
+    if (!action || action.ownerPrincipalId !== principal.principalId) return null;
+    return action;
   },
 });

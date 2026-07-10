@@ -152,6 +152,20 @@ const insertRevision = async (
     now: number;
   },
 ) => {
+  const fixtureIds = args.contract.criteria.flatMap((criterion) =>
+    criterion.passCondition.kind === "fixture_assertion"
+      ? [criterion.passCondition.fixtureVersion as Id<"fixtureVersions">]
+      : [],
+  );
+  const fixtures = await Promise.all(fixtureIds.map((fixtureId) => ctx.db.get(fixtureId)));
+  for (const fixture of fixtures) {
+    if (!fixture || (fixture.visibility === "restricted" && fixture.ownerPrincipalId !== args.principalId)) {
+      throw new ConvexError({ code: "INVALID_FIXTURE", message: "A referenced fixture is missing or not owned by this requester." });
+    }
+  }
+  const fixtureDigest = fixtures.length
+    ? sha256Digest(fixtures.map((fixture) => ({ id: String(fixture!._id), manifestSha256: fixture!.manifestSha256, bundleSha256: fixture!.bundleSha256, version: fixture!.version })))
+    : undefined;
   const criteriaDigest = sha256Digest(args.contract.criteria);
   const contractDigest = sha256Digest({
     ...args.contract,
@@ -170,6 +184,7 @@ const insertRevision = async (
     tags: args.contract.tags,
     targetEnvironments: args.contract.targetEnvironments,
     criteriaDigest,
+    fixtureDigest,
     workEscrowBaseUnits: args.contract.workEscrowBaseUnits,
     reviewReserveBaseUnits: args.contract.reviewReserveBaseUnits,
     totalFundingTargetBaseUnits: args.contract.totalFundingTargetBaseUnits,
@@ -195,6 +210,7 @@ const insertRevision = async (
       weightBps: criterion.weightBps,
       requiredForPublication: criterion.requiredForPublication,
       tags: [...criterion.tags],
+      fixtureVersionId: criterion.passCondition.kind === "fixture_assertion" ? criterion.passCondition.fixtureVersion as Id<"fixtureVersions"> : undefined,
       createdAt: args.now,
     });
   }
@@ -352,18 +368,124 @@ export const get = query({
   handler: async (ctx, args) => {
     const rfs = await ctx.db.get(args.rfsId);
     if (!rfs || rfs.policyVersion !== POLICY_V2.version || !rfs.currentRevisionId) return null;
-    const [revision, criteria] = await Promise.all([
+    const [revision, criteria, authorProfile, claimantProfile, assessment, skill, evidence] = await Promise.all([
       ctx.db.get(rfs.currentRevisionId),
       ctx.db.query("rfsCriteria").withIndex("by_revision", (query) => query.eq("revisionId", rfs.currentRevisionId!)).collect(),
+      ctx.db.query("publicProfiles").withIndex("by_principal", (query) => query.eq("principalId", rfs.authorUserId)).unique(),
+      rfs.claimantUserId ? ctx.db.query("publicProfiles").withIndex("by_principal", (query) => query.eq("principalId", rfs.claimantUserId!)).unique() : null,
+      ctx.db.query("payoutAssessments").withIndex("by_rfs", (query) => query.eq("rfsId", rfs._id)).first(),
+      ctx.db.query("skills").withIndex("by_rfs", (query) => query.eq("rfsId", rfs._id)).first(),
+      ctx.db.query("evidenceArtifacts").withIndex("by_rfs", (query) => query.eq("rfsId", rfs._id)).collect(),
     ]);
-    return { rfs, revision, criteria };
+    const version = skill?.publishedVersionId ? await ctx.db.get(skill.publishedVersionId) : null;
+    return {
+      rfs: {
+        rfsId: rfs._id,
+        title: rfs.title,
+        description: rfs.description,
+        scope: rfs.scope,
+        tags: rfs.tags,
+        status: rfs.status,
+        policyVersion: rfs.policyVersion,
+        riskTier: rfs.riskTier,
+        authorHandle: authorProfile?.handle ?? "verified-requester",
+        selectedAuthorHandle: claimantProfile?.handle,
+        workEscrowBaseUnits: rfs.workEscrowBaseUnits,
+        reviewReserveBaseUnits: rfs.reviewReserveBaseUnits,
+        totalFundingTargetBaseUnits: rfs.totalFundingTargetBaseUnits,
+        fundedBaseUnits: rfs.currentAmountBaseUnits,
+        fundingDeadline: rfs.fundingDeadline,
+        applicationDeadline: rfs.applicationDeadline,
+        deliveryDeadline: rfs.deliveryDeadline,
+        revisionDeadline: rfs.revisionDeadline,
+        contractDigest: rfs.contractDigest,
+        resourceVersion: rfs.resourceVersion,
+      },
+      revision: revision ? {
+        revisionId: revision._id,
+        revisionNumber: revision.revisionNumber,
+        status: revision.status,
+        targetEnvironments: revision.targetEnvironments,
+        fixtureDigest: revision.fixtureDigest,
+        contractDigest: revision.contractDigest,
+        createdAt: revision.createdAt,
+        frozenAt: revision.frozenAt,
+      } : null,
+      criteria: criteria.map((criterion) => ({
+        criterionId: criterion._id,
+        criterionKey: criterion.criterionKey,
+        title: criterion.title,
+        passCondition: criterion.passCondition,
+        verificationMethod: criterion.verificationMethod,
+        weightBps: criterion.weightBps,
+        requiredForPublication: criterion.requiredForPublication,
+        tags: criterion.tags,
+        fixtureVersionId: criterion.fixtureVersionId,
+      })),
+      submission: skill && version ? {
+        skillId: skill._id,
+        skillVersionId: version._id,
+        version: version.version,
+        contentHash: version.contentHash,
+        digestAlgorithm: version.digestAlgorithm,
+        summary: version.summary,
+        quarantineState: version.quarantineState ?? "clear",
+        status: version.status,
+        publishedAt: version.publishedAt,
+      } : null,
+      assessment: assessment ? {
+        status: assessment.status,
+        workflowStatus: assessment.workflowStatus,
+        decisionKind: assessment.decisionKind,
+        passedWeightBps: assessment.passedWeightBps,
+        assessmentReason: assessment.assessmentReason,
+        decidedAt: assessment.decidedAt,
+      } : null,
+      publicEvidence: evidence.filter((artifact) => !artifact.deletedAt).map((artifact) => ({
+        artifactId: artifact._id,
+        criterionId: artifact.criterionId,
+        classification: artifact.classification,
+        publicRedaction: artifact.publicRedaction,
+        verificationState: artifact.verificationState,
+        scanState: artifact.scanState,
+        mimeType: artifact.mimeType,
+        sizeBytes: artifact.sizeBytes,
+        createdAt: artifact.createdAt,
+      })),
+    };
   },
 });
 
 export const listRevisions = query({
   args: { rfsId: v.id("rfs") },
   returns: v.any(),
-  handler: async (ctx, args) => await ctx.db.query("rfsRevisions").withIndex("by_rfs_and_revisionNumber", (query) => query.eq("rfsId", args.rfsId)).collect(),
+  handler: async (ctx, args) => (await ctx.db.query("rfsRevisions").withIndex("by_rfs_and_revisionNumber", (query) => query.eq("rfsId", args.rfsId)).collect()).map((revision) => ({
+    revisionId: revision._id,
+    revisionNumber: revision.revisionNumber,
+    status: revision.status,
+    targetEnvironments: revision.targetEnvironments,
+    fixtureDigest: revision.fixtureDigest,
+    contractDigest: revision.contractDigest,
+    createdAt: revision.createdAt,
+    frozenAt: revision.frozenAt,
+    cancelledAt: revision.cancelledAt,
+  })),
+});
+
+export const listPublic = query({
+  args: { status: v.optional(v.string()), limit: v.optional(v.number()) },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db.query("rfs").order("desc").take(Math.min(100, args.limit ?? 25));
+    return rows.filter((row) => row.policyVersion === POLICY_V2.version && (!args.status || row.status === args.status)).map((row) => ({
+      rfsId: row._id, title: row.title, description: row.description, scope: row.scope, tags: row.tags,
+      status: row.status, workEscrowBaseUnits: row.workEscrowBaseUnits,
+      reviewReserveBaseUnits: row.reviewReserveBaseUnits, totalFundingTargetBaseUnits: row.totalFundingTargetBaseUnits,
+      fundedBaseUnits: row.currentAmountBaseUnits, fundingDeadline: row.fundingDeadline,
+      applicationDeadline: row.applicationDeadline, policyVersion: row.policyVersion,
+      riskTier: row.riskTier, contractDigest: row.contractDigest, resourceVersion: row.resourceVersion,
+    }));
+  },
 });
 
 export const expireFunding = internalMutation({
