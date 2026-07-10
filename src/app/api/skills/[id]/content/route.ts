@@ -5,6 +5,7 @@ import { api } from "../../../../../../convex/_generated/api";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { errorResponse, errorResponseFrom } from "@/app/api/_lib/responses";
 import { getMppx } from "@/lib/mpp";
+import { moneyWritesDisabledResponse } from "@/lib/operational-gates";
 
 const MPP_DECIMALS = 6;
 const MAX_TEST_AMOUNT_BASE_UNITS = BigInt(9_000);
@@ -42,6 +43,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
     if (access.skill.status !== "published") {
       return errorResponse("INVALID_STATE", "Skill is not available for purchase.", 409);
+    }
+
+    const disabledResponse = moneyWritesDisabledResponse();
+    if (disabledResponse) {
+      return disabledResponse;
     }
 
     const chargeAmount = formatBaseUnits(

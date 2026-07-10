@@ -1,10 +1,16 @@
 import { api } from "../../../../../../../convex/_generated/api";
 import type { Id } from "../../../../../../../convex/_generated/dataModel";
 import { fetchAuthMutation, isAuthenticated } from "@/lib/auth-server";
+import { moneyWritesDisabledResponse } from "@/lib/operational-gates";
 
 import { errorResponse, errorResponseFrom } from "../../../../_lib/responses";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const disabledResponse = moneyWritesDisabledResponse();
+  if (disabledResponse) {
+    return disabledResponse;
+  }
+
   if (!(await isAuthenticated())) {
     return errorResponse("UNAUTHORIZED", "Authentication required.", 401);
   }

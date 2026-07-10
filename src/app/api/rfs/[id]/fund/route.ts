@@ -5,6 +5,7 @@ import { api } from "../../../../../../convex/_generated/api";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { errorResponse, errorResponseFrom, okWriteResponse } from "@/app/api/_lib/responses";
 import { getMppx } from "@/lib/mpp";
+import { moneyWritesDisabledResponse } from "@/lib/operational-gates";
 
 const MPP_DECIMALS = 6;
 const AMOUNT_DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
@@ -26,6 +27,11 @@ const parseAmountStringToBaseUnits = (amount: string): bigint | null => {
 };
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const disabledResponse = moneyWritesDisabledResponse();
+  if (disabledResponse) {
+    return disabledResponse;
+  }
+
   try {
     const requestForBody = request.clone();
     const body = (await requestForBody.json()) as { amount?: unknown };
