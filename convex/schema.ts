@@ -517,6 +517,24 @@ export default defineSchema({
     .index("by_chain_and_address", ["chain", "address"])
     .index("by_principal_and_primary", ["principalId", "primary"]),
 
+  walletVerificationChallenges: defineTable({
+    principalId: v.string(),
+    chain: v.string(),
+    chainId: v.number(),
+    address: v.string(),
+    nonce: v.string(),
+    domain: v.string(),
+    uri: v.string(),
+    message: v.string(),
+    messageDigest: v.string(),
+    state: v.union(v.literal("pending"), v.literal("consumed"), v.literal("expired")),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_principal_and_state", ["principalId", "state"])
+    .index("by_state_and_expiresAt", ["state", "expiresAt"]),
+
   principalSigningKeys: defineTable({
     principalId: v.string(),
     publicKey: v.string(),
@@ -529,6 +547,21 @@ export default defineSchema({
   })
     .index("by_principal_and_purpose", ["principalId", "purpose"])
     .index("by_publicKey", ["publicKey"]),
+
+  proofKeyChallenges: defineTable({
+    principalId: v.string(),
+    publicKey: v.string(),
+    algorithm: v.literal("ed25519"),
+    purpose: v.literal("proof_manifest"),
+    challenge: v.string(),
+    challengeDigest: v.string(),
+    state: v.union(v.literal("pending"), v.literal("consumed"), v.literal("expired")),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_principal_and_state", ["principalId", "state"])
+    .index("by_state_and_expiresAt", ["state", "expiresAt"]),
 
   publicProfiles: defineTable({
     principalId: v.string(),
@@ -566,6 +599,30 @@ export default defineSchema({
   })
     .index("by_apiKeyId", ["apiKeyId"])
     .index("by_principal_and_status", ["principalId", "status"]),
+
+  apiKeyAuthorizations: defineTable({
+    principalId: v.string(),
+    apiKeyId: v.string(),
+    permissions: v.array(v.string()),
+    authorizationDigest: v.string(),
+    issuedAt: v.number(),
+    revokedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_apiKeyId", ["apiKeyId"])
+    .index("by_principal", ["principalId"]),
+
+  privilegedSessionAttestations: defineTable({
+    principalId: v.string(),
+    sessionId: v.string(),
+    authenticationMethod: v.literal("passkey"),
+    authenticatedAt: v.number(),
+    expiresAt: v.number(),
+    authorizationDigest: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_sessionId", ["sessionId"])
+    .index("by_principal_and_expiresAt", ["principalId", "expiresAt"]),
 
   humanActionRequests: defineTable({
     ownerPrincipalId: v.string(),
@@ -627,6 +684,19 @@ export default defineSchema({
     .index("by_principal_and_status", ["principalId", "status"])
     .index("by_status_and_coolingOffUntil", ["status", "coolingOffUntil"]),
 
+  accountRecoveryChallenges: defineTable({
+    principalId: v.string(),
+    walletId: v.id("principalWallets"),
+    challenge: v.string(),
+    challengeDigest: v.string(),
+    state: v.union(v.literal("pending"), v.literal("consumed"), v.literal("expired")),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_principal_and_state", ["principalId", "state"])
+    .index("by_state_and_expiresAt", ["state", "expiresAt"]),
+
   platformRoles: defineTable({
     principalId: v.string(),
     role: v.union(
@@ -687,6 +757,19 @@ export default defineSchema({
     .index("by_principal", ["principalId"])
     .index("by_cluster", ["clusterId"])
     .index("by_principal_and_activeUntil", ["principalId", "activeUntil"]),
+
+  identityClusterEvents: defineTable({
+    actorPrincipalId: v.string(),
+    eventType: v.union(v.literal("merge"), v.literal("split"), v.literal("override_expired")),
+    sourceClusterIds: v.array(v.id("identityClusters")),
+    resultingClusterIds: v.array(v.id("identityClusters")),
+    affectedPrincipalIds: v.array(v.string()),
+    reason: v.string(),
+    overrideExpiresAt: v.optional(v.number()),
+    occurredAt: v.number(),
+  })
+    .index("by_actor", ["actorPrincipalId"])
+    .index("by_eventType", ["eventType"]),
 
   paymentIntents: defineTable({
     resourceType: v.union(v.literal("rfs_funding"), v.literal("skill_purchase"), v.literal("author_bond")),
