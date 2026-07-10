@@ -129,7 +129,7 @@ const insertIntent = async (
   ctx: MutationCtx,
   args: {
     principal: PrincipalContext;
-    resourceType: "rfs_funding" | "skill_purchase";
+    resourceType: "rfs_funding" | "skill_purchase" | "author_bond";
     resourceId: string;
     skillVersionId?: Id<"skillVersions">;
     wallet: Doc<"principalWallets">;
@@ -237,7 +237,7 @@ export const createFundingIntent = mutation({
       throw new ConvexError({ code: "INVALID_AMOUNT", message: "Amount is below the minimum contribution." });
     }
     const revision = await ctx.db.get(rfs.currentRevisionId);
-    if (!revision || revision.status !== "committed" || revision.contractDigest !== rfs.contractDigest) {
+    if (!revision || (revision.status !== "draft" && revision.status !== "committed") || revision.contractDigest !== rfs.contractDigest) {
       throw new ConvexError({ code: "INVALID_CONTRACT", message: "Committed contract revision not found." });
     }
     const reserved = rfs.reservedFundingBaseUnits ?? BigInt(0);
@@ -256,6 +256,10 @@ export const createFundingIntent = mutation({
     });
     if (existing) {
       return resultForIntent(existing);
+    }
+    if (revision.status === "draft") {
+      const now = Date.now();
+      await ctx.db.patch(revision._id, { status: "committed", challengedAt: now, frozenAt: now });
     }
     const keyAuthorization = await ctx.db
       .query("apiKeyAuthorizations")
@@ -364,6 +368,36 @@ export const createPurchaseIntent = mutation({
       idempotencyKey: args.idempotencyKey,
       requestDigest,
       action: "create_purchase_intent",
+    });
+  },
+});
+
+export const createBondIntent = mutation({
+  args: { applicationId: v.id("rfsApplications"), idempotencyKey: v.string() },
+  returns: intentResultValidator,
+  handler: async (ctx, args) => {
+    const principal = await requirePrincipal(ctx);
+    await requireMoneyPolicy(ctx, principal.principalId);
+    const application = await ctx.db.get(args.applicationId);
+    const rfs = application ? await ctx.db.get(application.rfsId) : null;
+    if (!application || !rfs || application.principalId !== principal.principalId || application.state !== "selected" || !application.bondRequired || !rfs.currentRevisionId) {
+      throw new ConvexError({ code: "INVALID_STATE", message: "A selected bond-required application is required." });
+    }
+    const [wallet, revision] = await Promise.all([requirePrimaryWallet(ctx, principal.principalId), ctx.db.get(rfs.currentRevisionId)]);
+    if (!revision) throw new ConvexError({ code: "INVALID_CONTRACT", message: "RFS contract is unavailable." });
+    const amountBaseUnits = (rfs.workEscrowBaseUnits! * BigInt(500)) / BigInt(10_000) < BigInt(10_000_000)
+      ? BigInt(10_000_000)
+      : (rfs.workEscrowBaseUnits! * BigInt(500)) / BigInt(10_000) > BigInt(100_000_000)
+        ? BigInt(100_000_000)
+        : (rfs.workEscrowBaseUnits! * BigInt(500)) / BigInt(10_000);
+    const requestDigest = digest(JSON.stringify({ applicationId: String(application._id), amountBaseUnits: amountBaseUnits.toString() }));
+    const existing = await existingIdempotentIntent(ctx, { principalId: principal.principalId, action: "create_bond_intent", idempotencyKey: args.idempotencyKey, requestDigest });
+    if (existing) return resultForIntent(existing);
+    return await insertIntent(ctx, {
+      principal, resourceType: "author_bond", resourceId: String(application._id), wallet,
+      amountBaseUnits, tokenAddress: revision.tokenAddress, network: revision.network,
+      contractDigest: revision.contractDigest, idempotencyKey: args.idempotencyKey,
+      requestDigest, action: "create_bond_intent",
     });
   },
 });
@@ -547,7 +581,20 @@ export const confirmVerifiedReceipt = mutation({
         resultResourceId = String(purchase.purchaseId);
       }
     } else {
-      throw new ConvexError({ code: "INVALID_STATE", message: "Bond receipts use the assignment workflow." });
+      const applicationId = ctx.db.normalizeId("rfsApplications", intent.resourceId);
+      const application = applicationId ? await ctx.db.get(applicationId) : null;
+      const rfs = application ? await ctx.db.get(application.rfsId) : null;
+      if (!application || !rfs || application.principalId !== intent.principalId || application.state !== "selected" || !application.bondRequired) {
+        throw new ConvexError({ code: "INVALID_STATE", message: "Bond application is unavailable." });
+      }
+      const existingBond = await ctx.db.query("bondEscrows").withIndex("by_application", (query) => query.eq("applicationId", application._id)).unique();
+      const bondId = existingBond?._id ?? await ctx.db.insert("bondEscrows", {
+        rfsId: rfs._id, applicationId: application._id, principalId: intent.principalId,
+        amountBaseUnits: intent.amountBaseUnits, paymentIntentId: intent._id, state: "funded", createdAt: args.verifiedAt,
+      });
+      if (existingBond && existingBond.state !== "funded") await ctx.db.patch(existingBond._id, { state: "funded" });
+      resultResourceType = "bondEscrow";
+      resultResourceId = String(bondId);
     }
     if (intent.delegationId) {
       await consumeReservedDelegatedSpend(ctx, intent.delegationId, intent.amountBaseUnits);

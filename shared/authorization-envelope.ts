@@ -115,3 +115,63 @@ export const paymentIntentChallengePayload = (args: {
     contractDigest: args.contractDigest,
     expiresAt: args.expiresAt,
   });
+
+export const evidenceUploadAuthorizationPayload = (args: {
+  principalId: string;
+  rfsId: string;
+  skillVersionId: string;
+  criterionId?: string;
+  evaluationId?: string;
+  mimeType: string;
+  expiresAt: number;
+}) =>
+  JSON.stringify({
+    kind: "evidence_upload_authorization",
+    principalId: args.principalId,
+    rfsId: args.rfsId,
+    skillVersionId: args.skillVersionId,
+    criterionId: args.criterionId ?? null,
+    evaluationId: args.evaluationId ?? null,
+    mimeType: args.mimeType.toLowerCase(),
+    expiresAt: args.expiresAt,
+  });
+
+export const evidenceFinalizePayload = (args: {
+  uploadIntentId: string;
+  principalId: string;
+  storageId: string;
+  classification: string;
+  restrictionReason?: string;
+  plaintextSha256: string;
+  ciphertextSha256: string;
+  wrappedDataKey: string;
+  nonce: string;
+  authenticationTag: string;
+  kmsKeyVersion: string;
+  mimeType: string;
+  sizeBytes: number;
+  publicRedaction?: string;
+  proofManifest: string;
+  proofSignature: string;
+  signingKeyId: string;
+}) =>
+  JSON.stringify({
+    kind: "evidence_finalize",
+    uploadIntentId: args.uploadIntentId,
+    principalId: args.principalId,
+    storageId: args.storageId,
+    classification: args.classification,
+    restrictionReason: args.restrictionReason ?? null,
+    plaintextSha256: args.plaintextSha256,
+    ciphertextSha256: args.ciphertextSha256,
+    wrappedDataKey: args.wrappedDataKey,
+    nonce: args.nonce,
+    authenticationTag: args.authenticationTag,
+    kmsKeyVersion: args.kmsKeyVersion,
+    mimeType: args.mimeType.toLowerCase(),
+    sizeBytes: args.sizeBytes,
+    publicRedaction: args.publicRedaction ?? null,
+    proofManifest: args.proofManifest,
+    proofSignature: args.proofSignature,
+    signingKeyId: args.signingKeyId,
+  });

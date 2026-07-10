@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
+import { POLICY_V2 } from "./lib/policy";
 import { rfsStatusValidator } from "./lib/validators";
 
 export type ConfirmedContribution = {
@@ -52,9 +53,17 @@ export const recordConfirmedContribution = async (
   const currentAmountBaseUnits = rfs.currentAmountBaseUnits + args.appliedAmountBaseUnits;
   const fundingTarget = rfs.totalFundingTargetBaseUnits ?? rfs.fundingThresholdBaseUnits;
   const rfsNextState = currentAmountBaseUnits >= fundingTarget ? "funded" : rfs.status;
+  const applicationDeadline =
+    rfsNextState === "funded" && rfs.policyVersion === POLICY_V2.version && !rfs.applicationDeadline
+      ? Date.now() + POLICY_V2.applicationWindowMs[rfs.riskTier ?? "low"]
+      : rfs.applicationDeadline;
   await ctx.db.patch(rfs._id, {
     currentAmountBaseUnits,
     status: rfsNextState,
+    applicationDeadline,
+    applicationWindowRound: rfsNextState === "funded" ? (rfs.applicationWindowRound ?? 1) : rfs.applicationWindowRound,
+    resourceVersion:
+      rfsNextState !== rfs.status ? (rfs.resourceVersion ?? 1) + 1 : rfs.resourceVersion,
   });
   await ctx.db.insert("paymentEvents", {
     type: "fund",

@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
-import { internalMutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { computeFeeSplit, getLatestSkillVersion, userBackedRfs } from "./lib/helpers";
 import { requirePrincipal } from "./lib/principals";
 import { skillStatusValidator } from "./lib/validators";
@@ -251,5 +251,35 @@ export const getAuthorizedContent = query({
       summary: version.summary,
       tags: version.tags,
     };
+  },
+});
+
+export const redeemContent = mutation({
+  args: { skillId: v.id("skills"), skillVersionId: v.id("skillVersions") },
+  returns: v.object({ contentMarkdown: v.string(), version: v.number(), contentHash: v.string(), installRecorded: v.boolean() }),
+  handler: async (ctx, args) => {
+    const principal = await requirePrincipal(ctx);
+    if (!(await principalHasSkillAccess(ctx, { principalId: principal.principalId, skillId: args.skillId, skillVersionId: args.skillVersionId }))) {
+      throw new ConvexError({ code: "FORBIDDEN", message: "Content access is not granted." });
+    }
+    const [skill, version] = await Promise.all([ctx.db.get(args.skillId), ctx.db.get(args.skillVersionId)]);
+    if (!skill || !version || version.skillId !== skill._id || version.quarantineState === "quarantined") throw new ConvexError({ code: "NOT_FOUND", message: "Exact skill version is unavailable." });
+    const grants = await ctx.db.query("accessGrants").withIndex("by_user_skill", (query) => query.eq("userId", principal.principalId).eq("skillId", skill._id)).collect();
+    const grant = grants.find((item) => item.active !== false && (!item.skillVersionId || item.skillVersionId === version._id));
+    if (!grant && skill.authorUserId !== principal.principalId) throw new ConvexError({ code: "FORBIDDEN", message: "An active exact-version grant is required." });
+    let installRecorded = false;
+    if (grant) {
+      const existing = await ctx.db.query("installEvents").withIndex("by_principal_and_skillVersion", (query) => query.eq("principalId", principal.principalId).eq("skillVersionId", version._id)).unique();
+      if (!existing) {
+        const membership = (await ctx.db.query("identityClusterMemberships").withIndex("by_principal", (query) => query.eq("principalId", principal.principalId)).collect()).find((item) => item.activeUntil === undefined);
+        if (!membership) throw new ConvexError({ code: "IDENTITY_CLUSTER_REQUIRED", message: "Active identity cluster required." });
+        const authorMembership = (await ctx.db.query("identityClusterMemberships").withIndex("by_principal", (query) => query.eq("principalId", skill.authorUserId)).collect()).find((item) => item.activeUntil === undefined);
+        const adoptionWeightBps = authorMembership?.clusterId === membership.clusterId ? 0 : grant.source === "admin" || grant.source === "evaluation" ? 2_500 : 10_000;
+        await ctx.db.insert("installEvents", { principalId: principal.principalId, identityClusterId: membership.clusterId, skillId: skill._id, skillVersionId: version._id, accessGrantId: grant._id, adoptionWeightBps, redeemedAt: Date.now() });
+        installRecorded = true;
+      }
+      if (!grant.redeemedAt) await ctx.db.patch(grant._id, { redeemedAt: Date.now(), skillVersionId: version._id });
+    }
+    return { contentMarkdown: version.contentMarkdown, version: version.version, contentHash: version.contentHash, installRecorded };
   },
 });

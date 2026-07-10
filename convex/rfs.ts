@@ -169,6 +169,7 @@ export const create = mutation({
       currentAmountBaseUnits: BigInt(0),
       fundingTokenAddress,
       status: "open",
+      policyVersion: 1,
     });
 
     return { rfsId, nextState: "open" as const };
@@ -326,6 +327,13 @@ export const claim = mutation({
     const callerUserId = await requireAuthedUserId(ctx);
     const rfs = await getRfsByIdOrThrow(ctx, args.rfsId);
 
+    if (rfs.policyVersion === 2) {
+      throw new ConvexError({
+        code: "API_VERSION_RETIRED",
+        message: "Policy-v2 requests use scored applications; direct claim is unavailable.",
+      });
+    }
+
     if (rfs.status !== "funded") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -388,6 +396,13 @@ export const submit = mutation({
     }
 
     const rfs = await getRfsByIdOrThrow(ctx, args.rfsId);
+
+    if (rfs.policyVersion === 2) {
+      throw new ConvexError({
+        code: "API_VERSION_RETIRED",
+        message: "Policy-v2 submissions use the versioned submission workflow.",
+      });
+    }
 
     if (rfs.claimantUserId !== callerUserId) {
       throw new ConvexError({ code: "FORBIDDEN", message: "Only the assigned claimant can submit this RFS." });
