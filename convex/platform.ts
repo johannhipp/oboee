@@ -12,6 +12,60 @@ const roleValidator = v.union(
   v.literal("platform_operator"),
 );
 
+const requireNonproductionBootstrap = () => {
+  if (
+    process.env.OBOE_ENVIRONMENT !== "nonproduction" ||
+    process.env.OBOE_NONPRODUCTION_BOOTSTRAP_ENABLED !== "true"
+  ) {
+    throw new ConvexError({
+      code: "BOOTSTRAP_DISABLED",
+      message: "The nonproduction bootstrap is disabled.",
+    });
+  }
+};
+
+export const bootstrapPolicyV2Cohort = internalMutation({
+  args: {
+    principalIds: v.array(v.string()),
+    reason: v.string(),
+  },
+  returns: v.object({ mode: v.literal("cohort"), principalCount: v.number() }),
+  handler: async (ctx, args) => {
+    requireNonproductionBootstrap();
+    const principalIds = [...new Set(args.principalIds.map((id) => id.trim()).filter(Boolean))];
+    if (principalIds.length === 0 || !args.reason.trim()) {
+      throw new ConvexError({
+        code: "INVALID_BOOTSTRAP",
+        message: "At least one principal and an audit reason are required.",
+      });
+    }
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("featureFlags")
+      .withIndex("by_key", (query) => query.eq("key", "policy_v2"))
+      .unique();
+    const value = {
+      mode: "cohort" as const,
+      cohortIds: principalIds,
+      updatedByPrincipalId: "system:nonproduction-bootstrap",
+      reason: args.reason.trim(),
+      updatedAt: now,
+    };
+    const featureFlagId = existing
+      ? (await ctx.db.patch(existing._id, value), existing._id)
+      : await ctx.db.insert("featureFlags", { key: "policy_v2", ...value });
+    await recordOperatorAudit(ctx, {
+      actorPrincipalId: "system:nonproduction-bootstrap",
+      action: "feature_flag.bootstrap",
+      targetType: "featureFlag",
+      targetId: String(featureFlagId),
+      reason: args.reason,
+      metadata: { mode: "cohort", principalIds },
+    });
+    return { mode: "cohort" as const, principalCount: principalIds.length };
+  },
+});
+
 export const bootstrapPlatformRole = internalMutation({
   args: {
     principalId: v.string(),

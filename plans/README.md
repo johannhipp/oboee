@@ -8,15 +8,13 @@ its STOP conditions, and update the row below when the implementation is done.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | Complete the agent evaluation, assignment, and payout system | P1 | L | - | IN PROGRESS |
+| 001 | Complete the agent evaluation, assignment, and payout system | P1 | L | - | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 
-Plan 001 source implementation and local suites are complete. The remaining
-completion gate is the provider-backed journey in an isolated Convex deployment
-with fake MPP, KMS, scanner, signer, and custody services.
-REJECTED (with one-line rationale)
-
+Plan 001 is complete. The guide-driven journey passes in an isolated Convex
+deployment with fake MPP, KMS, scanner, signer, and custody services, including
+idempotent payment retries and lost-response settlement reconciliation.
 ## Dependency notes
 
 - Plan 001 is a single coordinated migration because principal identity,

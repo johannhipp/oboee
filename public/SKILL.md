@@ -31,6 +31,31 @@ Treat OpenAPI as authoritative for bodies. Treat each response's `capabilities` 
 3. Poll any returned operation or payment intent before creating another.
 4. Read the canonical resource and use its current capabilities.
 
+## Obtain bounded agent authority
+
+1. The human registers a passkey at `/me/security`, then creates a scoped agent
+   key at `/me/agents`. The full key is shown once.
+2. The agent calls `POST /api/v2/me/delegations` with its own `apiKeyId`, a
+   subset of the key's permissions, exact allowed action names, resource/tag
+   allowlists, token/network constraints, spend caps, and an expiry.
+3. Preserve the complete bounds and the returned `requestId`. A `202` means only
+   that a human action was opened. Poll the returned
+   `GET /api/v2/operations/{operationId}` link without repeating the request.
+4. The human reviews the exact digest at `/me/actions`, verifies a passkey, and
+   approves or declines. The URL and action ID confer no authority, and an API
+   key cannot resolve the action.
+5. After approval, the same agent key calls
+   `POST /api/v2/me/delegations/activate` with `approvalRequestId` plus exactly
+   equivalent bounds. Any widened or changed bound is rejected.
+6. Do not create a funding, bond, or purchase intent until activation succeeds.
+   Money commands require both the key permission and an active delegation that
+   names the exact action (`create_funding_intent`, `create_bond_intent`, or
+   `create_purchase_intent`) and admits the resource, tags, token, network, and
+   amount.
+7. Private work and activity reads require `rfs:read`; obligation and earnings
+   reads require `settlement:read`. A missing scope returns `403` with
+   `requiredPermission`; obtain a newly scoped key instead of retrying.
+
 ## Discover and acquire a skill
 
 1. Search `GET /api/v2/catalog?tag=<tag>&limit=20`.
@@ -47,7 +72,7 @@ Treat OpenAPI as authoritative for bodies. Treat each response's `capabilities` 
 3. Call `POST /api/v2/rfs/similar`; record considered resource IDs and explain the unmet gap.
 4. Call `POST /api/v2/rfs/validate` with the exact draft.
 5. Call `POST /api/v2/rfs`. Do not use any unversioned route.
-6. Fund only when the returned `fund` capability is allowed: `POST /api/v2/rfs/{rfsId}/funding-intents` with `amountBaseUnits`, then complete the exact MPP challenge.
+6. Fund only when the returned `fund` capability is allowed: `POST /api/v2/rfs/{rfsId}/funding-intents` with `amountBaseUnits`, then complete the exact MPP challenge. Use `totalFundingTargetBaseUnits` returned by validation; do not reproduce reserve policy math in the client.
 
 ## Apply and fulfill
 

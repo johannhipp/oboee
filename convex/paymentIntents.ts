@@ -226,6 +226,18 @@ export const createFundingIntent = mutation({
     if (args.amountBaseUnits <= BigInt(0)) {
       throw new ConvexError({ code: "INVALID_AMOUNT", message: "Funding amount must be positive." });
     }
+    const requestDigest = digest(
+      JSON.stringify({ rfsId: String(args.rfsId), amountBaseUnits: args.amountBaseUnits.toString() }),
+    );
+    const existing = await existingIdempotentIntent(ctx, {
+      principalId: principal.principalId,
+      action: "create_funding_intent",
+      idempotencyKey: args.idempotencyKey,
+      requestDigest,
+    });
+    if (existing) {
+      return resultForIntent(existing);
+    }
     const [rfs, wallet] = await Promise.all([
       ctx.db.get(args.rfsId),
       requirePrimaryWallet(ctx, principal.principalId),
@@ -244,18 +256,6 @@ export const createFundingIntent = mutation({
     const remaining = revision.totalFundingTargetBaseUnits - rfs.currentAmountBaseUnits - reserved;
     if (args.amountBaseUnits > remaining) {
       throw new ConvexError({ code: "FUNDING_CAPACITY_EXCEEDED", message: "Amount exceeds remaining funding capacity." });
-    }
-    const requestDigest = digest(
-      JSON.stringify({ rfsId: String(rfs._id), amountBaseUnits: args.amountBaseUnits.toString() }),
-    );
-    const existing = await existingIdempotentIntent(ctx, {
-      principalId: principal.principalId,
-      action: "create_funding_intent",
-      idempotencyKey: args.idempotencyKey,
-      requestDigest,
-    });
-    if (existing) {
-      return resultForIntent(existing);
     }
     if (revision.status === "draft") {
       const now = Date.now();
@@ -305,6 +305,18 @@ export const createPurchaseIntent = mutation({
   handler: async (ctx, args) => {
     const principal = await requirePrincipal(ctx);
     await requireMoneyPolicy(ctx, principal.principalId);
+    const requestDigest = digest(
+      JSON.stringify({ skillId: String(args.skillId), skillVersionId: String(args.skillVersionId) }),
+    );
+    const existing = await existingIdempotentIntent(ctx, {
+      principalId: principal.principalId,
+      action: "create_purchase_intent",
+      idempotencyKey: args.idempotencyKey,
+      requestDigest,
+    });
+    if (existing) {
+      return resultForIntent(existing);
+    }
     const [skill, version, wallet] = await Promise.all([
       ctx.db.get(args.skillId),
       ctx.db.get(args.skillVersionId),
@@ -325,18 +337,6 @@ export const createPurchaseIntent = mutation({
     const revision = rfs?.currentRevisionId ? await ctx.db.get(rfs.currentRevisionId) : null;
     if (!rfs || !revision || revision.policyVersion !== POLICY_V2.version) {
       throw new ConvexError({ code: "INVALID_CONTRACT", message: "Skill contract is unavailable." });
-    }
-    const requestDigest = digest(
-      JSON.stringify({ skillId: String(skill._id), skillVersionId: String(version._id) }),
-    );
-    const existing = await existingIdempotentIntent(ctx, {
-      principalId: principal.principalId,
-      action: "create_purchase_intent",
-      idempotencyKey: args.idempotencyKey,
-      requestDigest,
-    });
-    if (existing) {
-      return resultForIntent(existing);
     }
     const keyAuthorization = await ctx.db
       .query("apiKeyAuthorizations")
@@ -393,8 +393,25 @@ export const createBondIntent = mutation({
     const requestDigest = digest(JSON.stringify({ applicationId: String(application._id), amountBaseUnits: amountBaseUnits.toString() }));
     const existing = await existingIdempotentIntent(ctx, { principalId: principal.principalId, action: "create_bond_intent", idempotencyKey: args.idempotencyKey, requestDigest });
     if (existing) return resultForIntent(existing);
+    const keyAuthorization = await ctx.db
+      .query("apiKeyAuthorizations")
+      .withIndex("by_apiKeyId", (query) => query.eq("apiKeyId", principal.sessionId))
+      .unique();
+    const delegationId = keyAuthorization
+      ? await requireAndReserveDelegatedSpend(ctx, {
+          principal,
+          requiredPermission: "fund",
+          action: "create_bond_intent",
+          resourceId: String(application._id),
+          tags: rfs.tags,
+          tokenAddress: revision.tokenAddress,
+          network: revision.network,
+          amountBaseUnits,
+        })
+      : undefined;
     return await insertIntent(ctx, {
       principal, resourceType: "author_bond", resourceId: String(application._id), wallet,
+      delegationId,
       amountBaseUnits, tokenAddress: revision.tokenAddress, network: revision.network,
       contractDigest: revision.contractDigest, idempotencyKey: args.idempotencyKey,
       requestDigest, action: "create_bond_intent",

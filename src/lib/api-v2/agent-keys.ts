@@ -11,7 +11,7 @@ import { v2Error, v2Success } from "./responses";
 const marketplacePermission = z.enum(["rfs:read", "rfs:write", "fund", "apply", "submit", "evaluate", "purchase", "settlement:read"]);
 const keySchema = z.object({
   name: z.string().min(1).max(80),
-  expiresIn: z.number().int().min(60).max(365 * 24 * 60 * 60).optional(),
+  expiresIn: z.number().int().min(24 * 60 * 60).max(365 * 24 * 60 * 60).optional(),
   permissions: z.array(marketplacePermission).min(1),
 });
 
@@ -24,13 +24,6 @@ const envelopeSecret = () => {
 const requireCookieSession = (method: "api_key" | "cookie") => {
   if (method !== "cookie") throw Object.assign(new Error("Agent keys can only be managed by an interactive human session."), { code: "FORBIDDEN" });
 };
-
-const permissionStatement = (permissions: readonly z.infer<typeof marketplacePermission>[]) => ({
-  rfs: permissions.filter((permission) => permission === "rfs:read" || permission === "rfs:write").map((permission) => permission.split(":")[1]),
-  marketplace: permissions.filter((permission) => !permission.includes(":")),
-  skills: permissions.includes("purchase") ? ["purchase"] : [],
-  settlement: permissions.includes("settlement:read") ? ["read"] : [],
-});
 
 const proxyAuth = async (request: Request, path: string, method: "GET" | "POST", body?: unknown) => {
   const target = new URL(`/api/auth${path}`, request.url);
@@ -59,8 +52,6 @@ export const createAgentKey = v2Command({
     const response = await proxyAuth(request, "/api-key/create", "POST", {
       name: input.name,
       expiresIn: input.expiresIn,
-      permissions: permissionStatement(input.permissions),
-      metadata: { oboePermissions: permissions },
     });
     if (!response.ok) throw Object.assign(new Error("Agent key creation failed."), { code: "AGENT_KEY_CREATE_FAILED" });
     const created = z.object({ id: z.string().min(1), key: z.string().min(1) }).passthrough().parse(await response.json());

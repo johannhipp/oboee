@@ -38,21 +38,23 @@ export const v2Error = (args: {
   status: number;
   retryable?: boolean;
   fieldErrors?: Record<string, string[]>;
+  requiredPermission?: string;
   retryAfterSeconds?: number;
   links?: Record<string, string>;
 }) => {
   const headers = baseHeaders(args.requestId);
   if (args.retryAfterSeconds) headers.set("retry-after", String(args.retryAfterSeconds));
-  const payload = errorEnvelopeSchema.parse({ apiVersion: "v2", requestId: args.requestId, code: args.code, message: args.message, fieldErrors: args.fieldErrors, retryable: args.retryable ?? false, retryAfterSeconds: args.retryAfterSeconds, links: { openapi: "/api/v2/openapi.json", ...(args.links ?? {}) } });
+  const payload = errorEnvelopeSchema.parse({ apiVersion: "v2", requestId: args.requestId, code: args.code, message: args.message, fieldErrors: args.fieldErrors, requiredPermission: args.requiredPermission, retryable: args.retryable ?? false, retryAfterSeconds: args.retryAfterSeconds, links: { openapi: "/api/v2/openapi.json", ...(args.links ?? {}) } });
   return Response.json(payload, { status: args.status, headers });
 };
 
 export const statusForCode = (code: string) => {
-  if (code.includes("UNAUTHORIZED") || code === "authentication_required") return 401;
-  if (code.includes("FORBIDDEN") || code.includes("INELIGIBLE") || code.includes("REQUIRED")) return 403;
-  if (code.includes("NOT_FOUND")) return 404;
-  if (code.includes("STALE") || code.includes("CONFLICT") || code.includes("DUPLICATE") || code.includes("IN_PROGRESS")) return 409;
-  if (code.includes("DISABLED") || code.includes("CONFIGURATION")) return 503;
-  if (code.includes("RATE")) return 429;
+  const normalized = code.toLowerCase();
+  if (normalized.includes("unauthorized") || normalized === "authentication_required") return 401;
+  if (normalized.includes("forbidden") || normalized.includes("ineligible") || normalized.includes("required")) return 403;
+  if (normalized.includes("not_found")) return 404;
+  if (normalized.includes("stale") || normalized.includes("conflict") || normalized.includes("duplicate") || normalized.includes("in_progress")) return 409;
+  if (normalized.includes("disabled") || normalized.includes("configuration")) return 503;
+  if (normalized.includes("rate")) return 429;
   return 400;
 };
