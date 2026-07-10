@@ -24,7 +24,6 @@ const skillDocValidator = v.object({
   _creationTime: v.number(),
   rfsId: v.id("rfs"),
   authorUserId: v.string(),
-  contentMarkdown: v.string(),
   summary: v.string(),
   tags: v.array(v.string()),
   purchasePriceBaseUnits: v.int64(),
@@ -174,12 +173,20 @@ export const get = query({
           .then((events) => events.length)
       : 0;
 
-    const safeSkill =
-      skill && (skill.status === "published" || hasAccess)
-        ? skill
-        : skill
-          ? { ...skill, contentMarkdown: "" }
-          : undefined;
+    const safeSkill = skill
+      ? {
+          _id: skill._id,
+          _creationTime: skill._creationTime,
+          rfsId: skill.rfsId,
+          authorUserId: skill.authorUserId,
+          summary: skill.summary,
+          tags: skill.tags,
+          purchasePriceBaseUnits: skill.purchasePriceBaseUnits,
+          latestVersion: skill.latestVersion,
+          latestContentHash: skill.latestContentHash,
+          status: skill.status,
+        }
+      : undefined;
 
     const hasClaimant = Boolean(rfs.claimantUserId);
     const canFund = rfs.status === "open";

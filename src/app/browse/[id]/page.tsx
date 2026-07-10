@@ -125,17 +125,6 @@ export default async function Page({
             </AsciiBox>
           ) : null}
 
-          {skill && skill.contentMarkdown ? (
-            <AsciiBox title="skill preview" className="mt-6">
-              <p className="text-sm leading-relaxed break-words">
-                {skill.contentMarkdown.slice(0, 200)}...
-              </p>
-              <p className="text-xs text-muted-foreground mt-2 font-mono">
-                {rfs.status === "published" ? "buy to read full skill" : "visible to eligible evaluators"}
-              </p>
-            </AsciiBox>
-          ) : null}
-
           <AsciiBox title="evaluation policy" className="mt-6">
             <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
               <p>Evaluators must submit evidence from actually trying the skill. Star ratings alone do not affect payout.</p>

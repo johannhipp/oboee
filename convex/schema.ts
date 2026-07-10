@@ -93,6 +93,7 @@ export default defineSchema({
     currentRevisionId: v.optional(v.id("rfsRevisions")),
     contractDigest: v.optional(v.string()),
     resourceVersion: v.optional(v.number()),
+    reservedFundingBaseUnits: v.optional(v.int64()),
   })
     .index("by_status", ["status"])
     .index("by_author", ["authorUserId"])
@@ -111,6 +112,8 @@ export default defineSchema({
     policyVersion: v.optional(v.number()),
     payerWalletId: v.optional(v.id("principalWallets")),
     refundedAt: v.optional(v.number()),
+    appliedAmountBaseUnits: v.optional(v.int64()),
+    refundAmountBaseUnits: v.optional(v.int64()),
   })
     .index("by_rfs", ["rfsId"])
     .index("by_backer", ["backerUserId"])
@@ -774,6 +777,7 @@ export default defineSchema({
   paymentIntents: defineTable({
     resourceType: v.union(v.literal("rfs_funding"), v.literal("skill_purchase"), v.literal("author_bond")),
     resourceId: v.string(),
+    skillVersionId: v.optional(v.id("skillVersions")),
     principalId: v.string(),
     walletId: v.id("principalWallets"),
     payerAddressSnapshot: v.string(),
@@ -798,6 +802,8 @@ export default defineSchema({
     expiresAt: v.number(),
     createdAt: v.number(),
     confirmedAt: v.optional(v.number()),
+    resultResourceType: v.optional(v.string()),
+    resultResourceId: v.optional(v.string()),
   })
     .index("by_principal_resource_and_state", ["principalId", "resourceType", "resourceId", "state"])
     .index("by_idempotencyKey", ["idempotencyKey"])

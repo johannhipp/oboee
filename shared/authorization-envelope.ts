@@ -57,3 +57,61 @@ export const delegationApprovalPayload = (args: {
     network: args.network?.trim().toLowerCase() ?? null,
     expiresAt: args.expiresAt ?? null,
   });
+
+export const paymentReceiptPayload = (args: {
+  intentId: string;
+  principalId: string;
+  resourceType: string;
+  resourceId: string;
+  skillVersionId?: string;
+  amountBaseUnits: bigint;
+  tokenAddress: string;
+  network: string;
+  contractDigest: string;
+  challengeId: string;
+  receiptReference: string;
+  verifiedAt: number;
+}) =>
+  JSON.stringify({
+    kind: "verified_payment_receipt",
+    intentId: args.intentId,
+    principalId: args.principalId,
+    resourceType: args.resourceType,
+    resourceId: args.resourceId,
+    skillVersionId: args.skillVersionId ?? null,
+    amountBaseUnits: args.amountBaseUnits.toString(),
+    tokenAddress: args.tokenAddress.trim().toLowerCase(),
+    network: args.network.trim().toLowerCase(),
+    contractDigest: args.contractDigest,
+    challengeId: args.challengeId,
+    receiptReference: args.receiptReference,
+    verifiedAt: args.verifiedAt,
+  });
+
+export const paymentIntentChallengePayload = (args: {
+  intentId: string;
+  principalId: string;
+  resourceType: string;
+  resourceId: string;
+  skillVersionId?: string;
+  walletAddress: string;
+  amountBaseUnits: bigint;
+  tokenAddress: string;
+  network: string;
+  contractDigest: string;
+  expiresAt: number;
+}) =>
+  JSON.stringify({
+    kind: "payment_intent_challenge",
+    intentId: args.intentId,
+    principalId: args.principalId,
+    resourceType: args.resourceType,
+    resourceId: args.resourceId,
+    skillVersionId: args.skillVersionId ?? null,
+    walletAddress: args.walletAddress,
+    amountBaseUnits: args.amountBaseUnits.toString(),
+    tokenAddress: args.tokenAddress.trim().toLowerCase(),
+    network: args.network.trim().toLowerCase(),
+    contractDigest: args.contractDigest,
+    expiresAt: args.expiresAt,
+  });

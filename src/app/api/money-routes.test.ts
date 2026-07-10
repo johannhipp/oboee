@@ -1,83 +1,39 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-const fetchQuery = vi.fn();
-const getMppx = vi.fn();
+const fetchQueryMock = vi.fn();
+const fetchMutationMock = vi.fn();
+const getMppxMock = vi.fn();
 
 vi.mock("convex/nextjs", () => ({
-  fetchMutation: vi.fn(),
-  fetchQuery,
+  fetchQuery: fetchQueryMock,
+  fetchMutation: fetchMutationMock,
 }));
+vi.mock("@/lib/mpp", () => ({ getMppx: getMppxMock }));
 
-vi.mock("@/lib/mpp", () => ({
-  getMppx,
-}));
-
-describe("money route kill switch", () => {
-  afterEach(() => {
-    vi.clearAllMocks();
-    vi.unstubAllEnvs();
-  });
-
-  it("does not issue a funding challenge while disabled", async () => {
-    vi.stubEnv("OBOE_MONEY_WRITES_ENABLED", "false");
+describe("retired money routes", () => {
+  it("returns the funding successor without invoking business or payment dependencies", async () => {
     const { POST } = await import("./rfs/[id]/fund/route");
-
-    const response = await POST(new Request("http://localhost/api/rfs/rfs-id/fund"), {
-      params: Promise.resolve({ id: "rfs-id" }),
+    const response = await POST();
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "api_version_retired",
+      replacement: { method: "POST", path: "/api/v2/rfs/{id}/funding-intents" },
     });
-
-    expect(response.status).toBe(503);
-    expect(getMppx).not.toHaveBeenCalled();
-    expect(fetchQuery).not.toHaveBeenCalled();
+    expect(fetchQueryMock).not.toHaveBeenCalled();
+    expect(fetchMutationMock).not.toHaveBeenCalled();
+    expect(getMppxMock).not.toHaveBeenCalled();
   });
 
-  it("allows an entitled content read without opening the money gate", async () => {
-    vi.stubEnv("OBOE_MONEY_WRITES_ENABLED", "false");
-    fetchQuery.mockResolvedValueOnce({
-      hasAccess: true,
-      skill: {
-        _id: "skill-id",
-        status: "published",
-        contentMarkdown: "safe fixture",
-      },
-      skillVersion: {
-        version: 1,
-        contentHash: "sha256:fixture",
-        evaluationDeadline: 1,
-      },
-    });
+  it("returns the content capability successor without reading protected content", async () => {
     const { GET } = await import("./skills/[id]/content/route");
-
-    const response = await GET(new Request("http://localhost/api/skills/skill-id/content"), {
-      params: Promise.resolve({ id: "skill-id" }),
+    const response = await GET();
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "api_version_retired",
+      replacement: { method: "GET", path: "/api/v2/skills/{id}" },
     });
-
-    expect(response.status).toBe(200);
-    expect(getMppx).not.toHaveBeenCalled();
-  });
-
-  it("does not issue a purchase challenge while disabled", async () => {
-    vi.stubEnv("OBOE_MONEY_WRITES_ENABLED", "false");
-    fetchQuery.mockResolvedValueOnce({
-      hasAccess: false,
-      skill: {
-        _id: "skill-id",
-        status: "published",
-        purchasePriceBaseUnits: BigInt(5_000),
-      },
-      skillVersion: {
-        version: 1,
-        contentHash: "sha256:fixture",
-        evaluationDeadline: 1,
-      },
-    });
-    const { GET } = await import("./skills/[id]/content/route");
-
-    const response = await GET(new Request("http://localhost/api/skills/skill-id/content"), {
-      params: Promise.resolve({ id: "skill-id" }),
-    });
-
-    expect(response.status).toBe(503);
-    expect(getMppx).not.toHaveBeenCalled();
+    expect(fetchQueryMock).not.toHaveBeenCalled();
+    expect(fetchMutationMock).not.toHaveBeenCalled();
+    expect(getMppxMock).not.toHaveBeenCalled();
   });
 });
