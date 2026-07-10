@@ -3,8 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { anyApi } from "convex/server";
 import { z } from "zod";
 
-import { ApiAuthenticationError, fetchPrincipalMutation, resolveApiAuthentication, type ApiAuthentication } from "@/lib/api-auth";
+import { ApiAuthenticationError, fetchPrincipalMutation, fetchPrincipalQuery, resolveApiAuthentication, type ApiAuthentication } from "@/lib/api-auth";
 import { toJsonValue } from "@/lib/json";
+import type { MarketplacePermission } from "../../../convex/lib/authorization";
+import { permissionForAgentCommand } from "./permissions";
 import { v2Error, statusForCode } from "./responses";
 
 export type V2Context<T> = {
@@ -22,7 +24,8 @@ const errorDetails = (error: unknown) => {
     const data = "data" in error && error.data && typeof error.data === "object" ? error.data as Record<string, unknown> : error as Record<string, unknown>;
     const code = typeof data.code === "string" ? data.code.toLowerCase() : "request_failed";
     const message = typeof data.message === "string" ? data.message : error instanceof Error ? error.message : "Request failed.";
-    return { code, message, status: statusForCode(code) };
+    const requiredPermission = typeof data.requiredPermission === "string" ? data.requiredPermission : undefined;
+    return { code, message, status: statusForCode(code), requiredPermission };
   }
   return { code: "request_failed", message: "Request failed.", status: 500 };
 };
@@ -42,7 +45,7 @@ const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(to
 export const v2Public = (handler: (context: { request: Request; requestId: string }) => Promise<Response>) => async (request: Request) => {
   const requestId = request.headers.get("x-request-id")?.trim() || randomUUID();
   try { return await handler({ request, requestId }); }
-  catch (error) { const details = errorDetails(error); return v2Error({ requestId, ...details, retryable: details.status >= 500, fieldErrors: "fieldErrors" in details ? details.fieldErrors : undefined }); }
+  catch (error) { const details = errorDetails(error); return v2Error({ requestId, ...details, retryable: details.status >= 500, fieldErrors: "fieldErrors" in details ? details.fieldErrors : undefined, requiredPermission: "requiredPermission" in details ? details.requiredPermission : undefined }); }
 };
 
 export const v2Authenticated = (handler: (context: { request: Request; requestId: string; authentication: ApiAuthentication }) => Promise<Response>) => v2Public(async ({ request, requestId }) => {
@@ -56,6 +59,32 @@ export const v2Authenticated = (handler: (context: { request: Request; requestId
   return response;
 });
 
+const requireApiKeyPermission = async (
+  authentication: ApiAuthentication,
+  requiredPermission: MarketplacePermission,
+) => {
+  if (authentication.method !== "api_key") return;
+  const allowed = await fetchPrincipalQuery(
+    anyApi.delegations.hasApiKeyPermission,
+    { permission: requiredPermission },
+    authentication,
+  );
+  if (!allowed) {
+    throw Object.assign(new Error(`The API key requires ${requiredPermission}.`), {
+      code: "FORBIDDEN",
+      requiredPermission,
+    });
+  }
+};
+
+export const v2Authorized = (
+  requiredPermission: MarketplacePermission,
+  handler: (context: { request: Request; requestId: string; authentication: ApiAuthentication }) => Promise<Response>,
+) => v2Authenticated(async (context) => {
+  await requireApiKeyPermission(context.authentication, requiredPermission);
+  return await handler(context);
+});
+
 export const v2ParsedCommand = <T>(args: {
   action: string;
   parse: (request: Request) => Promise<T>;
@@ -64,6 +93,15 @@ export const v2ParsedCommand = <T>(args: {
 }) => v2Public(async ({ request, requestId }) => {
   const authentication = await resolveApiAuthentication(request);
   requireCommandOrigin(request, authentication);
+  if (authentication.method === "api_key") {
+    const requiredPermission = permissionForAgentCommand(args.action);
+    if (requiredPermission === null) {
+      throw Object.assign(new Error("This command is not available to API keys."), { code: "FORBIDDEN" });
+    }
+    if (requiredPermission !== "agent_control") {
+      await requireApiKeyPermission(authentication, requiredPermission);
+    }
+  }
   const idempotencyKey = request.headers.get("idempotency-key")?.trim();
   if (!idempotencyKey || idempotencyKey.length > 200) return v2Error({ requestId, code: "idempotency_key_required", message: "Every v2 command requires a valid Idempotency-Key header.", status: 400 });
   const input = await args.parse(request);
@@ -82,7 +120,7 @@ export const v2ParsedCommand = <T>(args: {
   } catch (error) {
     const details = errorDetails(error);
     await fetchPrincipalMutation(anyApi.apiProtocol.failCommand, { recordId: reservation.recordId, requestDigest, errorCode: details.code }, authentication).catch(() => undefined);
-    return v2Error({ requestId, ...details, retryable: details.status >= 500, fieldErrors: "fieldErrors" in details ? details.fieldErrors : undefined });
+    return v2Error({ requestId, ...details, retryable: details.status >= 500, fieldErrors: "fieldErrors" in details ? details.fieldErrors : undefined, requiredPermission: "requiredPermission" in details ? details.requiredPermission : undefined });
   }
 });
 

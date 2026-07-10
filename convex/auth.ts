@@ -34,7 +34,7 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
       apiKey({
         enableSessionForAPIKeys: true,
         keyExpiration: {
-          defaultExpiresIn: 90 * 24 * 60 * 60 * 1_000,
+          defaultExpiresIn: 90 * 24 * 60 * 60,
           minExpiresIn: 1,
           maxExpiresIn: 365,
         },

@@ -1814,7 +1814,7 @@ All boxes must hold:
       to a numbered step, concrete files/routes/pages, and verification.
 - [x] The generated OpenAPI 3.1 document, Zod schemas, Convex validators,
       `public/SKILL.md`, `/docs`, and executable route behavior agree in CI.
-- [ ] `public/SKILL.md` was rebuilt after the final v2 route/state contract, not
+- [x] `public/SKILL.md` was rebuilt after the final v2 route/state contract, not
       copied from the plan; every named endpoint/example validates against
       OpenAPI and the guide-driven fresh-agent E2E suite passes.
 - [x] `/api/v2` is the only policy-v2 mutation surface; compatibility routes
@@ -1835,7 +1835,7 @@ All boxes must hold:
       safe-content, CSP, CSRF, RBAC, and responsive-layout requirements.
 - [x] `npm ci`, `npm test`, `npm run lint`, `npm run typecheck`, and
       `npm run build` exit 0 from a clean checkout.
-- [ ] `npm run test:e2e` passes against the documented nonproduction environment.
+- [x] `npm run test:e2e` passes against the documented nonproduction environment.
 - [x] `git diff --check` returns no output.
 - [x] No secrets, raw wallet signing keys, plaintext restricted evidence, raw IPs,
       or direct storage URLs appear in source, logs, fixtures, or snapshots.
