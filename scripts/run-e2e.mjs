@@ -4,6 +4,7 @@ import process from "node:process";
 
 const root = new URL("../", import.meta.url).pathname;
 const providerToken = "local-e2e-provider-token";
+const convexCliEnv = { ...process.env, CI: "1", CONVEX_AGENT_MODE: "anonymous" };
 const childProcesses = [];
 
 const run = (command, args, options = {}) => {
@@ -50,7 +51,7 @@ process.on("SIGTERM", () => { stopChildren(); process.exit(143); });
 try {
   if (!existsSync(`${root}.env.local`)) {
     run("npx", ["convex", "dev", "--once", "--typecheck", "disable"], {
-      env: { ...process.env, CI: "1" },
+      env: convexCliEnv,
     });
   }
 
@@ -62,7 +63,7 @@ try {
   const reusedConvex = await isReady("http://127.0.0.1:3210/version");
   if (!reusedConvex) {
     start("npx", ["convex", "dev", "--typecheck", "disable", "--tail-logs", "disable"], {
-      env: { ...process.env, CI: "1" },
+      env: convexCliEnv,
     });
     await waitFor("http://127.0.0.1:3210/version");
   }
@@ -83,7 +84,7 @@ try {
     OBOE_SETTLEMENT_CONFIRMATIONS: "1",
   };
   for (const [name, value] of Object.entries(convexEnvironment)) {
-    run("npx", ["convex", "env", "set", name, value]);
+    run("npx", ["convex", "env", "set", name, value], { env: convexCliEnv });
   }
 
   const playwright = spawnSync("npx", ["playwright", "test", ...process.argv.slice(2)], {
