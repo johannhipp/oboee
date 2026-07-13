@@ -63,7 +63,7 @@ export function HumanActions({ actions }: { actions: Record<string, unknown>[] }
             </article>
           );
         })}
-        {actions.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No pending actions.</p> : null}
+        {actions.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No pending human actions.</p> : null}
       </div>
       {message ? <p role="status" className="mt-4 border-y border-border py-3 font-mono text-xs">{message}</p> : null}
     </div>
