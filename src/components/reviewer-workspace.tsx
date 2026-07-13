@@ -93,7 +93,7 @@ export function ReviewerWorkspace({
     return (
       <div className="flex flex-wrap gap-3 border-t border-border pt-4">
         <button
-          className="border border-border px-3 py-2 text-sm font-mono"
+          className="border-b border-foreground pb-1 text-sm font-mono"
           disabled={Boolean(busy)}
           onClick={() =>
             run("accept", `/api/v2/review-assignments/${assignmentId}/accept`)
@@ -102,7 +102,7 @@ export function ReviewerWorkspace({
           accept assignment
         </button>
         <button
-          className="border border-border px-3 py-2 text-sm font-mono text-red-700"
+          className="border-b border-red-700 pb-1 text-sm font-mono text-red-700"
           disabled={Boolean(busy)}
           onClick={() =>
             run("decline", `/api/v2/review-assignments/${assignmentId}/decline`)
@@ -122,7 +122,7 @@ export function ReviewerWorkspace({
     <div className="space-y-8">
       <section aria-labelledby="proofs-heading">
         <h2 id="proofs-heading" className="text-base font-medium">
-          Proofs
+          Evidence
         </h2>
         <div className="mt-3 divide-y divide-border border-y border-border">
           {evidence.map((artifact) => (
@@ -144,14 +144,14 @@ export function ReviewerWorkspace({
                 ) : null}
               </div>
               <div className="flex flex-wrap items-start gap-2">
-                <a
-                  className="border border-border px-3 py-2 text-xs font-mono"
+                  <a
+                  className="border-b border-border pb-1 text-xs font-mono hover:border-foreground"
                   href={artifact.downloadHref}
                 >
                   inspect
                 </a>
                 <button
-                  className="border border-border px-3 py-2 text-xs font-mono"
+                  className="border-b border-border pb-1 text-xs font-mono hover:border-foreground"
                   disabled={Boolean(busy)}
                   onClick={() =>
                     run(
@@ -168,7 +168,7 @@ export function ReviewerWorkspace({
                   verify
                 </button>
                 <button
-                  className="border border-border px-3 py-2 text-xs font-mono text-red-700"
+                  className="border-b border-red-700 pb-1 text-xs font-mono text-red-700"
                   disabled={Boolean(busy)}
                   onClick={() =>
                     run(
@@ -229,7 +229,8 @@ export function ReviewerWorkspace({
               .
             </p>
             <select
-              className="mt-3 border border-border bg-background px-3 py-2 text-sm"
+              aria-label={`Result for ${criterion.title}`}
+              className="mt-3 border-0 border-b border-border bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground"
               value={results[criterion.criterionId]}
               onChange={(event) =>
                 setResults((current) => ({
@@ -250,7 +251,7 @@ export function ReviewerWorkspace({
           <textarea
             required
             rows={4}
-            className="mt-2 w-full border border-border bg-background p-3"
+            className="mt-2 w-full border-0 border-b border-border bg-transparent px-0 py-3 outline-none focus:border-foreground"
             value={reviewText}
             onChange={(event) => setReviewText(event.target.value)}
           />
@@ -267,14 +268,14 @@ export function ReviewerWorkspace({
           <button
             type="submit"
             disabled={Boolean(busy) || !skillVersionId}
-            className="bg-foreground px-4 py-2 text-sm font-mono text-background"
+            className="border-b border-foreground pb-1 text-sm font-mono"
           >
             submit evaluation
           </button>
           <button
             type="button"
             disabled={Boolean(busy)}
-            className="border border-border px-4 py-2 text-sm font-mono"
+            className="border-b border-border pb-1 text-sm font-mono hover:border-foreground"
             onClick={() =>
               run(
                 "complete",
