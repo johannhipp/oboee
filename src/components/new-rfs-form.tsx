@@ -26,7 +26,7 @@ type Preflight = {
   payloadDigest: string;
 };
 const input =
-  "mt-1 w-full border border-border bg-background px-3 py-2 text-sm";
+  "mt-1 w-full border-0 border-b border-border bg-transparent px-0 py-2 text-sm outline-none transition-colors focus:border-foreground";
 const tags = (value: string) =>
   value
     .split(",")
@@ -141,14 +141,21 @@ export function NewRfsForm({
 
   return (
     <main className="mx-auto max-w-3xl py-8">
-      <h1 className="text-xl font-medium">New request for skill</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Define observable criteria before funding. Criterion weights must total
-        10,000 bps and required criteria at least 6,000 bps.
+      <h1 className="text-xl font-medium">Create a request</h1>
+      <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+        Specify the outcome, acceptance criteria, and settlement parameters before publication. Criterion weights must total 10,000 bps; required criteria must total at least 6,000 bps.
       </p>
-      <div className="mt-6">
-        <FixtureUploader onRegistered={(fixtureVersionId) => setCriteria((current) => current.map((item, index) => index === 0 ? { ...item, kind: "fixture_assertion", fixtureVersion: fixtureVersionId } : item))} />
-      </div>
+      <details className="mt-6 border-y border-border py-3">
+        <summary className="cursor-pointer font-mono text-xs text-muted-foreground hover:text-foreground">
+          Register a fixture for deterministic verification
+        </summary>
+        <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
+          Use a fixture when the result must be checked against a fixed input bundle. Written assertions are sufficient for other requests.
+        </p>
+        <div className="mt-4">
+          <FixtureUploader onRegistered={(fixtureVersionId) => setCriteria((current) => current.map((item, index) => index === 0 ? { ...item, kind: "fixture_assertion", fixtureVersion: fixtureVersionId } : item))} />
+        </div>
+      </details>
       <form
         className="mt-6 space-y-7"
         onChange={() => setPreflight(null)}
@@ -221,7 +228,7 @@ export function NewRfsForm({
             </div>
             <button
               type="button"
-              className="border border-border px-3 py-2 font-mono text-xs"
+              className="border-b border-border pb-1 font-mono text-xs"
               onClick={() =>
                 setCriteria((current) => [
                   ...current,
@@ -239,7 +246,7 @@ export function NewRfsForm({
                 ])
               }
             >
-              add criterion
+              Add criterion
             </button>
           </div>
           <div className="mt-3 space-y-4">
@@ -251,23 +258,6 @@ export function NewRfsForm({
                 <legend className="font-mono text-xs">
                   criterion {index + 1}
                 </legend>
-                <label className="text-sm">
-                  Stable key
-                  <input
-                    required
-                    value={criterion.id}
-                    onChange={(event) =>
-                      setCriteria((current) =>
-                        current.map((item, itemIndex) =>
-                          itemIndex === index
-                            ? { ...item, id: event.target.value }
-                            : item,
-                        ),
-                      )
-                    }
-                    className={input}
-                  />
-                </label>
                 <label className="text-sm">
                   Title
                   <input
@@ -332,7 +322,7 @@ export function NewRfsForm({
                   />
                 </label>
                 <label className="text-sm">
-                  Weight (bps)
+                  Weight (10,000 total)
                   <input
                     required
                     type="number"
@@ -487,8 +477,8 @@ export function NewRfsForm({
           </label>
         </section>
         {preflight ? (
-          <section className="border border-border p-4" aria-live="polite">
-            <h2 className="font-medium">Preflight passed</h2>
+          <section className="border-y border-border py-4" aria-live="polite">
+            <h2 className="font-medium">Preflight</h2>
             <p className="mt-1 text-sm">
               Risk tier {preflight.validation.riskTier}; review reserve{" "}
               {preflight.validation.reviewReserveBaseUnits}; total funding
@@ -503,9 +493,9 @@ export function NewRfsForm({
         ) : null}
         <button
           disabled={busy || totalWeight !== 10_000}
-          className="bg-foreground px-5 py-2 font-mono text-sm text-background disabled:opacity-50"
+          className="w-fit border-b border-foreground pb-1 font-mono text-sm disabled:opacity-50"
         >
-          {busy ? "working..." : preflight ? "create request" : "run preflight"}
+          {busy ? "Processing…" : preflight ? "Create request" : "Run preflight"}
         </button>
         {error ? (
           <p role="alert" className="text-sm text-red-700">

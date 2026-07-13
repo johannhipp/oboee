@@ -62,7 +62,7 @@ export function PasskeyManager() {
     <section>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
         <h2 className="font-medium">Registered passkeys</h2>
-        <button type="button" disabled={busy} onClick={() => void add()} className="border border-foreground px-4 py-2 font-mono text-xs">add passkey</button>
+        <button type="button" disabled={busy} onClick={() => void add()} className="border-b border-foreground pb-1 font-mono text-xs">add passkey</button>
       </div>
       {passkeys.map((passkey) => <article key={passkey.id} className="grid gap-2 border-b border-border py-4 sm:grid-cols-[1fr_auto] sm:items-center">
         <div>
@@ -74,6 +74,6 @@ export function PasskeyManager() {
       {passkeys.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No passkeys registered.</p> : null}
     </section>
     <p className="border-l-2 border-foreground pl-3 text-sm text-muted-foreground">A recent passkey verification is required for human approvals, adjudication, account recovery, role changes, and operator overrides.</p>
-    {message ? <p role="status" className="border border-border p-3 font-mono text-xs">{message}</p> : null}
+    {message ? <p role="status" className="border-y border-border py-3 font-mono text-xs">{message}</p> : null}
   </div>;
 }

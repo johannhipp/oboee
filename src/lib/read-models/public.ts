@@ -34,7 +34,7 @@ export const buildPublicRfsListReadModel = (raw: unknown) => z.array(publicRfsLi
 
 const catalogSchema = z.object({
   items: z.array(z.object({
-    skillId: opaqueId, skillVersionId: opaqueId, category: z.string(), tags: z.array(z.string()), authorHandle: z.string(), qualityBps: z.number(), adoptionBps: z.number(), recencyBps: z.number(), totalBps: z.number(), confidence: z.string(), independentCount: z.number(), quarantineState: z.string(), publishedAt: z.number(), policyVersion: z.number(),
+    skillId: opaqueId, skillVersionId: opaqueId, title: z.string().optional(), summary: z.string().optional(), category: z.string(), tags: z.array(z.string()), authorHandle: z.string(), qualityBps: z.number(), adoptionBps: z.number(), recencyBps: z.number(), totalBps: z.number(), confidence: z.string(), independentCount: z.number(), quarantineState: z.string(), publishedAt: z.number(), policyVersion: z.number(),
   })),
   nextCursor: z.string().nullable(),
 });

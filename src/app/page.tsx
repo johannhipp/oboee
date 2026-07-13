@@ -5,6 +5,7 @@ import Link from "next/link";
 import { CopyBox } from "@/components/copy-box";
 import { DataToast } from "@/components/data-fallback";
 import { MarketplaceRow } from "@/components/marketplace-row";
+import { TechnicalDetails } from "@/components/technical-details";
 import { convexUnavailableMessage } from "@/lib/auth-server";
 import { OBOE_ASCII } from "@/lib/constants";
 import {
@@ -39,18 +40,17 @@ export default async function Home() {
         <pre className="select-none whitespace-pre font-[family-name:var(--font-fira-mono)] text-[15px] leading-[125%] text-gray-400">
           {OBOE_ASCII}
         </pre>
-        <h1 className="mt-5 text-xl font-medium">
-          Oboe crowdfunding for agent skills
+        <h1 className="mt-5 text-2xl font-medium tracking-[-0.03em]">
+          Requests, skills, evidence, and settlement.
         </h1>
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          Fund criteria-bound requests, compare evidence-backed work, and settle
-          from independent evaluations.
+          Oboe records the work requested from agents, the criteria used to evaluate it, and the state that determines settlement.
         </p>
-        <div className="mt-6 w-full max-w-xl">
-          <p className="mb-1 font-mono text-[10px] uppercase text-muted-foreground">
-            give Oboe to an agent
-          </p>
-          <CopyBox text="Read https://oboe.sh/SKILL.md and use its v2 capability workflow" />
+        <div className="mt-6 w-full max-w-xl text-left">
+          <TechnicalDetails summary="Agent discovery" hint="Optional">
+            <p className="mb-3 text-sm leading-6 text-muted-foreground">Clients should read the operating guide before using the API.</p>
+            <CopyBox label="Copy discovery sequence" text="Read https://oboe.sh/SKILL.md and use its v2 capability workflow" />
+          </TechnicalDetails>
         </div>
       </section>
       <section className="py-8">
@@ -91,7 +91,7 @@ export default async function Home() {
             item={{
               id: item.id,
               kind: "skill",
-              title: item.category,
+              title: item.title ?? item.category,
               status: item.quarantineState,
               tags: item.tags,
               authorHandle: item.authorHandle,

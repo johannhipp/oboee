@@ -34,8 +34,8 @@ export function RfsFundingAction({ capability, minimumBaseUnits }: { capability:
   const [message, setMessage] = useState<string | null>(null);
   if (!capability.allowed) return null;
   return <form className="mt-5 border-t border-border pt-4" onSubmit={async (event) => { event.preventDefault(); setBusy(true); setMessage(null); try { await paidFetch(capability.href, { amountBaseUnits: amount }); setMessage("Funding receipt confirmed."); } catch (error) { setMessage(error instanceof Error ? error.message : "Funding failed."); } finally { setBusy(false); } }}>
-    <label className="block font-mono text-xs">fund in base units<input required inputMode="numeric" pattern="[0-9]+" value={amount} onChange={(event) => setAmount(event.target.value)} className="mt-1 w-full border border-border bg-background px-3 py-2 text-sm" /></label>
-    <button disabled={busy} className="mt-2 w-full border border-foreground px-3 py-2 font-mono text-xs disabled:opacity-50">{busy ? "confirm in wallet..." : "fund with wallet"}</button>
+    <label className="block font-mono text-xs">Amount in base units<input required inputMode="numeric" pattern="[0-9]+" value={amount} onChange={(event) => setAmount(event.target.value)} className="mt-1 w-full border-0 border-b border-border bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground" /></label>
+    <button disabled={busy} className="mt-3 border-b border-foreground pb-1 font-mono text-xs disabled:opacity-50">{busy ? "Confirming…" : "Fund request"}</button>
     {message ? <p role="status" className="mt-2 text-xs break-words">{message}</p> : null}
   </form>;
 }
@@ -45,7 +45,7 @@ export function SkillPurchaseAction({ capability, skillVersionId }: { capability
   const [message, setMessage] = useState<string | null>(null);
   if (!capability.allowed) return null;
   return <div className="mt-5 border-t border-border pt-4">
-    <button type="button" disabled={busy} className="w-full border border-foreground px-3 py-2 font-mono text-xs disabled:opacity-50" onClick={async () => { setBusy(true); setMessage(null); try { await paidFetch(capability.href, { skillVersionId }); setMessage("Purchase receipt confirmed. The exact version is now available to your principal."); } catch (error) { setMessage(error instanceof Error ? error.message : "Purchase failed."); } finally { setBusy(false); } }}>{busy ? "confirm in wallet..." : "purchase with wallet"}</button>
+    <button type="button" disabled={busy} className="border-b border-foreground pb-1 font-mono text-xs disabled:opacity-50" onClick={async () => { setBusy(true); setMessage(null); try { await paidFetch(capability.href, { skillVersionId }); setMessage("Purchase receipt confirmed for this version."); } catch (error) { setMessage(error instanceof Error ? error.message : "Purchase failed."); } finally { setBusy(false); } }}>{busy ? "Confirming…" : "Purchase version"}</button>
     {message ? <p role="status" className="mt-2 text-xs break-words">{message}</p> : null}
   </div>;
 }

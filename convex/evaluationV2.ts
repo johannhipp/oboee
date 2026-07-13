@@ -343,7 +343,15 @@ export const listReviewAssignments = query({
     await requireActiveRole(ctx, { principalId: principal.principalId, role: "trusted_reviewer" });
     const assigned = await ctx.db.query("reviewAssignments").withIndex("by_reviewer_and_state", (query) => query.eq("reviewerPrincipalId", principal.principalId)).collect();
     const open = await ctx.db.query("reviewAssignments").withIndex("by_state_and_dueAt", (query) => query.eq("state", "open")).collect();
-    return [...assigned, ...open];
+    return await Promise.all(
+      [...assigned, ...open].map(async (assignment) => {
+        const rfs = await ctx.db.get(assignment.rfsId);
+        return {
+          ...assignment,
+          rfsTitle: rfs?.title ?? "Request unavailable",
+        };
+      }),
+    );
   },
 });
 
