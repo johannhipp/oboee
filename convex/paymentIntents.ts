@@ -316,8 +316,8 @@ export const createPurchaseIntent = mutation({
       version.skillId !== skill._id ||
       skill.publishedVersionId !== version._id ||
       skill.status !== "published" ||
-      skill.quarantineState === "quarantined" ||
-      version.quarantineState === "quarantined"
+      (skill.quarantineState ?? "clear") !== "clear" ||
+      (version.quarantineState ?? "clear") !== "clear"
     ) {
       throw new ConvexError({ code: "INVALID_STATE", message: "Exact published skill version is unavailable." });
     }
@@ -551,8 +551,8 @@ export const confirmVerifiedReceipt = mutation({
         !version ||
         version.skillId !== skill._id ||
         skill.publishedVersionId !== version._id ||
-        skill.quarantineState === "quarantined" ||
-        version.quarantineState === "quarantined"
+        (skill.quarantineState ?? "clear") !== "clear" ||
+        (version.quarantineState ?? "clear") !== "clear"
       ) {
         const obligation = await createRefundObligation(ctx, {
           intent,

@@ -36,7 +36,7 @@ export type ConfirmedPurchase = {
 export const recordConfirmedPurchase = async (ctx: MutationCtx, args: ConfirmedPurchase) => {
   const skill = await ctx.db.get(args.skillId);
   const version = await ctx.db.get(args.skillVersionId);
-  if (!skill || !version || version.skillId !== skill._id || skill.status !== "published") {
+  if (!skill || !version || version.skillId !== skill._id || skill.status !== "published" || (skill.quarantineState ?? "clear") !== "clear" || (version.quarantineState ?? "clear") !== "clear") {
     throw new ConvexError({ code: "INVALID_STATE", message: "Published skill version not found." });
   }
   const existing = await ctx.db
@@ -233,11 +233,11 @@ export const getAuthorizedContent = query({
       throw new ConvexError({ code: "NOT_FOUND", message: "Skill version not found." });
     }
     if (
-      (version.quarantineState === "quarantined" || skill.quarantineState === "quarantined") &&
+      ((version.quarantineState ?? "clear") !== "clear" || (skill.quarantineState ?? "clear") !== "clear") &&
       skill.authorUserId !== principal.principalId
     ) {
       version = skill.safeFallbackVersionId ? await ctx.db.get(skill.safeFallbackVersionId) : null;
-      if (!version || version.skillId !== skill._id || version.quarantineState === "quarantined") {
+      if (!version || version.skillId !== skill._id || (version.quarantineState ?? "clear") !== "clear") {
         throw new ConvexError({ code: "CONTENT_QUARANTINED", message: "No safe skill version is available." });
       }
     }
@@ -269,7 +269,7 @@ export const redeemContent = mutation({
       throw new ConvexError({ code: "FORBIDDEN", message: "Content access is not granted." });
     }
     const [skill, version] = await Promise.all([ctx.db.get(args.skillId), ctx.db.get(args.skillVersionId)]);
-    if (!skill || !version || version.skillId !== skill._id || version.quarantineState === "quarantined") throw new ConvexError({ code: "NOT_FOUND", message: "Exact skill version is unavailable." });
+    if (!skill || !version || version.skillId !== skill._id || (skill.quarantineState ?? "clear") !== "clear" || (version.quarantineState ?? "clear") !== "clear") throw new ConvexError({ code: "CONTENT_QUARANTINED", message: "Exact skill version is unavailable while safety review is active." });
     const grants = await ctx.db.query("accessGrants").withIndex("by_user_skill", (query) => query.eq("userId", principal.principalId).eq("skillId", skill._id)).collect();
     const grant = grants.find((item) => item.active !== false && (!item.skillVersionId || item.skillVersionId === version._id));
     if (!grant && skill.authorUserId !== principal.principalId) throw new ConvexError({ code: "FORBIDDEN", message: "An active exact-version grant is required." });

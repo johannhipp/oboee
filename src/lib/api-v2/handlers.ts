@@ -28,7 +28,7 @@ const ifMatch = (request: Request) => {
 export const getCatalog = v2Public(async ({ request, requestId }) => {
   const url = new URL(request.url);
   const result = await fetchQuery(anyApi.reputation.catalog, { category: url.searchParams.get("category") ?? undefined, authorHandle: url.searchParams.get("author") ?? undefined, tags: url.searchParams.getAll("tag"), cursor: url.searchParams.get("cursor") ?? undefined, limit: Number(url.searchParams.get("limit") ?? 20) });
-  return v2Success({ requestId, data: result.items.map((item: Record<string, unknown>) => ({ ...item, capabilities: skillCapabilities(String(item.skillId), String(item.skillVersionId), item.quarantineState !== "quarantined", item.policyVersion !== 1) })), capabilities: [], links: { self: request.url }, page: { nextCursor: result.nextCursor } });
+  return v2Success({ requestId, data: result.items.map((item: Record<string, unknown>) => ({ ...item, capabilities: skillCapabilities(String(item.skillId), String(item.skillVersionId), item.quarantineState === "clear", item.policyVersion !== 1) })), capabilities: [], links: { self: request.url }, page: { nextCursor: result.nextCursor } });
 });
 
 export const getSkills = getCatalog;
@@ -37,13 +37,13 @@ export const getSkill = (skillId: string) => v2Public(async ({ requestId }) => {
   const result = await fetchQuery(anyApi.skills.getPublic, { skillId });
   if (!result) return v2Error({ requestId, code: "not_found", message: "Skill not found.", status: 404 });
   const versionId = String(result.skillVersionId);
-  return v2Success({ requestId, data: buildPublicSkillReadModel(result), capabilities: skillCapabilities(skillId, versionId, result.quarantineState !== "quarantined", result.legacyImported !== true), links: { reviews: `/api/v2/skills/${skillId}/reviews`, installs: `/api/v2/skills/${skillId}/installs`, author: `/authors/${result.authorHandle}` } });
+  return v2Success({ requestId, data: buildPublicSkillReadModel(result), capabilities: skillCapabilities(skillId, versionId, result.quarantineState === "clear", result.legacyImported !== true), links: { reviews: `/api/v2/skills/${skillId}/reviews`, installs: `/api/v2/skills/${skillId}/installs`, author: `/authors/${result.authorHandle}` } });
 });
 
 export const getSkillVersion = (skillId: string, versionId: string) => v2Public(async ({ requestId }) => {
   const result = await fetchQuery(anyApi.skills.getVersionMetadata, { skillId, skillVersionId: versionId });
   if (!result) return v2Error({ requestId, code: "not_found", message: "Published skill version not found.", status: 404 });
-  return v2Success({ requestId, data: result, capabilities: skillCapabilities(skillId, versionId, result.quarantineState !== "quarantined", result.legacyImported !== true), links: { skill: `/api/v2/skills/${skillId}` } });
+  return v2Success({ requestId, data: result, capabilities: skillCapabilities(skillId, versionId, result.quarantineState === "clear", result.legacyImported !== true), links: { skill: `/api/v2/skills/${skillId}` } });
 });
 
 export const getSkillInstalls = (skillId: string) => v2Public(async ({ requestId }) => v2Success({ requestId, data: await fetchQuery(anyApi.skills.getInstallAggregate, { skillId }), capabilities: [], links: { skill: `/api/v2/skills/${skillId}` } }));
