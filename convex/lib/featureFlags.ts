@@ -21,4 +21,3 @@ export const requirePolicyV2Enabled = async (
   }
   return flag;
 };
-

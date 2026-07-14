@@ -23,4 +23,3 @@ export const canonicalJson = (value: unknown) => JSON.stringify(canonicalize(val
 
 export const sha256Digest = (value: unknown) =>
   bytesToHex(sha256(utf8ToBytes(typeof value === "string" ? value : canonicalJson(value))));
-
