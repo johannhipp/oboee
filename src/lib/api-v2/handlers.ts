@@ -366,20 +366,22 @@ export const resolveHumanAction = (actionId: string, approved: boolean) => v2Com
 });
 
 export const createRecoveryChallenge = v2Public(async ({ request, requestId }) => {
-  if (!request.headers.get("idempotency-key")?.trim()) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
+  const idempotencyKey = request.headers.get("idempotency-key")?.trim();
+  if (!idempotencyKey) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
   const input = z.object({ principalId: z.string().min(1), walletId: z.string().min(1) }).parse(await request.json().catch(() => ({})));
-  return v2Success({ requestId, data: await fetchMutation(anyApi.accountRecovery.createRecoveryChallenge, input), status: 201, links: { prove: "/api/v2/recovery/proofs" } });
+  return v2Success({ requestId, data: await fetchMutation(anyApi.accountRecovery.createRecoveryChallenge, { ...input, idempotencyKey }), status: 201, links: { prove: "/api/v2/recovery/proofs" } });
 });
 
 export const proveRecovery = v2Public(async ({ request, requestId }) => {
-  if (!request.headers.get("idempotency-key")?.trim()) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
+  const idempotencyKey = request.headers.get("idempotency-key")?.trim();
+  if (!idempotencyKey) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
   const input = z.object({ challengeId: z.string().min(1), challenge: z.string().min(1), signature: z.string().min(1) }).parse(await request.json().catch(() => ({})));
-  const result = await fetchMutation(anyApi.accountRecovery.proveRecoveryWallet, input);
+  const result = await fetchMutation(anyApi.accountRecovery.proveRecoveryWallet, { ...input, idempotencyKey });
   return v2Success({ requestId, data: result, status: 202, links: { status: `/api/v2/recovery/${String(result.requestId)}` }, headers: { "retry-after": "60" } });
 });
 
 export const getRecoveryStatus = (recoveryId: string) => v2Public(async ({ request, requestId }) => {
   const statusToken = request.headers.get("recovery-token") ?? "";
-  const result = await fetchMutation(anyApi.accountRecovery.getRecoveryStatus, { requestId: recoveryId, statusToken });
+  const result = await fetchQuery(anyApi.accountRecovery.getRecoveryStatus, { requestId: recoveryId, statusToken });
   return result ? v2Success({ requestId, data: result, links: { self: `/api/v2/recovery/${recoveryId}` }, headers: { "cache-control": "no-store", "retry-after": "60" } }) : v2Error({ requestId, code: "not_found", message: "Recovery request not found.", status: 404 });
 });
