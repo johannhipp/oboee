@@ -23,14 +23,26 @@ const command = (summary: string, schema?: z.ZodType, stateSensitive = false) =>
   summary,
   parameters: [{ name: "Idempotency-Key", in: "header", required: true, schema: { type: "string" } }, ...(stateSensitive ? [{ name: "If-Match", in: "header", required: true, schema: { type: "integer", minimum: 1 }, description: "Current resourceVersion from the latest read." }] : [])],
   ...(schema ? { requestBody: { required: true, content: { "application/json": { schema: z.toJSONSchema(schema) } } } } : {}),
-  responses: { "200": { description: "Success", content: { "application/json": { schema: { $ref: "#/components/schemas/Success" } } } }, "202": { description: "Accepted", content: { "application/json": { schema: { $ref: "#/components/schemas/Success" } } } }, "400": { description: "Invalid request", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } },
+  responses: { "200": { description: "Success", content: { "application/json": { schema: { $ref: "#/components/schemas/Success" } } } }, "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/Success" } } } }, "202": { description: "Accepted", content: { "application/json": { schema: { $ref: "#/components/schemas/Success" } } } }, "400": { description: "Invalid request", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, "401": { description: "Authentication required", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, "403": { description: "Forbidden", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, "409": { description: "Conflict or stale resource", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, "429": { description: "Rate limited", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } },
   security: [{ apiKey: [] }, { cookieSession: [] }],
 });
-const read = (summary: string, authenticated = false) => ({ summary, responses: { "200": { description: "Success", content: { "application/json": { schema: { $ref: "#/components/schemas/Success" } } } }, "404": { description: "Not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } }, ...(authenticated ? { security: [{ apiKey: [] }, { cookieSession: [] }] } : {}) });
+const queryParameter = (name: string, description: string, schema: Record<string, unknown>) => ({ name, in: "query", required: false, description, schema });
+const catalogParameters = [
+  queryParameter("category", "Exact discovery category.", { type: "string" }),
+  queryParameter("author", "Exact public author handle.", { type: "string" }),
+  queryParameter("tag", "Require every repeated tag filter.", { type: "array", items: { type: "string" } }),
+  queryParameter("cursor", "Cursor returned in the previous page.", { type: "string" }),
+  queryParameter("limit", "Positive page size; values above 100 are capped.", { type: "integer", minimum: 1, maximum: 100, default: 20 }),
+];
+const rfsParameters = [
+  queryParameter("status", "Filter by public RFS status.", { type: "string", enum: ["open", "funded", "assigned", "submitted", "evaluation_open", "revision_requested", "disputed", "published", "rejected", "cancelled", "fulfilled"] }),
+  queryParameter("limit", "Positive page size; values above 100 are capped.", { type: "integer", minimum: 1, maximum: 100, default: 25 }),
+];
+const read = (summary: string, authenticated = false, parameters: Record<string, unknown>[] = []) => ({ summary, ...(parameters.length ? { parameters } : {}), responses: { "200": { description: "Success", content: { "application/json": { schema: { $ref: "#/components/schemas/Success" } } } }, "404": { description: "Not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, ...(authenticated ? { "401": { description: "Authentication required", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } : {}) }, ...(authenticated ? { security: [{ apiKey: [] }, { cookieSession: [] }] } : {}) });
 
 const paths: Record<string, Record<string, unknown>> = {
-  "/api/v2/catalog": { get: read("Ranked skill catalog") },
-  "/api/v2/skills": { get: read("Published skills") },
+  "/api/v2/catalog": { get: read("Ranked skill catalog", false, catalogParameters) },
+  "/api/v2/skills": { get: read("Published skills", false, catalogParameters) },
   "/api/v2/skills/{skillId}": { get: read("Public skill detail") },
   "/api/v2/skills/{skillId}/versions/{versionId}": { get: read("Exact skill version metadata") },
   "/api/v2/skills/{skillId}/installs": { get: read("Aggregate verified adoption") },
@@ -46,7 +58,7 @@ const paths: Record<string, Record<string, unknown>> = {
   "/api/v2/fixtures": { post: command("Server-verify stored bytes and register an immutable fixture version", fixtureRegistrationSchema) },
   "/api/v2/fixtures/{fixtureVersionId}": { get: read("Fixture version metadata") },
   "/api/v2/fixtures/{fixtureVersionId}/content": { get: read("Controlled fixture bundle download", true) },
-  "/api/v2/rfs": { get: read("Public RFS list"), post: command("Create a policy-v2 RFS", rfsDraftSchema) },
+  "/api/v2/rfs": { get: read("Public RFS list", false, rfsParameters), post: command("Create a policy-v2 RFS", rfsDraftSchema) },
   "/api/v2/rfs/validate": { post: command("Validate an RFS draft", rfsDraftSchema) },
   "/api/v2/rfs/similar": { post: command("Find similar skills and RFSs") },
   "/api/v2/rfs/{rfsId}": { get: read("Public RFS contract"), patch: command("Append an RFS draft revision", rfsDraftSchema, true), delete: command("Cancel an unfunded RFS draft", undefined, true) },
