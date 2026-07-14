@@ -28,9 +28,9 @@ regression test, individual commit, and live verification.
 |---|---:|---:|
 | Critical | 0 | 0 |
 | High | 0 | 1 |
-| Medium | 0 | 0 |
+| Medium | 1 | 0 |
 | Low | 0 | 0 |
-| **Total** | **0** | **1** |
+| **Total** | **1** | **1** |
 
 The prior high-severity detail-page failure is recorded below as fixed. New
 findings are added immediately with reproduction evidence and a commit link.
@@ -96,6 +96,43 @@ projections consistent, and denies purchase capabilities for imported records.
 - The browser page renders `CVE chain playbook: ingress-to-runtime
   containment` and `Imported policy-v1 content`.
 
+### ISSUE-002: Agent guide advertises an MPP token address with a trailing newline
+
+| Field | Value |
+|---|---|
+| Severity | medium — open at discovery; fix in progress |
+| Category | functional / API contract |
+| First observed | 2026-07-15 |
+| Production URL | https://www.oboe.sh/.well-known/oboe-agent.json |
+| Evidence | [`issue-002-agent-guide.png`](production-20260715/screenshots/issue-002-agent-guide.png) and the raw response below |
+| Expected | `payments.token` is a normalized nonzero EVM address with no control characters |
+| Actual | The JSON string ends with `\\n`: `0x20c000000000000000000000b9537d11c60e8b50\\n` |
+
+**Reproduction**
+
+```sh
+curl -fsSL https://www.oboe.sh/.well-known/oboe-agent.json \
+  | jq -r '.payments.token' | od -An -t x1
+# ... 35 30 0a  (the final byte is the pipe's line ending; the JSON value itself
+# contains an escaped LF before jq prints it)
+
+curl -fsSL https://www.oboe.sh/.well-known/oboe-agent.json \
+  | jq -c '[.payments.token, (.payments.token | length), (.payments.token | test("\\\\n$"))]'
+# ["0x20c000000000000000000000b9537d11c60e8b50\\n",43,true]
+```
+
+The manifest is public machine-readable configuration, so an agent that uses
+the advertised token verbatim can fail address validation or construct an
+invalid payment request. The live MPP adapter already trims its own runtime
+configuration, which narrows this finding to the public contract boundary.
+
+**Root-cause hypothesis and fix target**
+
+`src/app/.well-known/oboe-agent.json/route.ts` serializes the raw
+`MPP_FUNDING_TOKEN_ADDRESS` environment value. Normalize it at that boundary,
+preserve the configured-at-runtime fallback for blank values, add a route
+regression test, deploy the isolated fix, and repeat the live assertion.
+
 ## Test records
 
 Each record below names the exact command, URL, or screenshot that proves the
@@ -105,6 +142,7 @@ that the request completed.
 | ID | Surface | Case | Result | Evidence |
 |---|---|---|---|---|
 | TBD | public API | agent guide and OpenAPI shape | pending | to be appended |
+| ISSUE-002 | public API | agent guide MPP token normalization | fail before fix | `production-20260715/screenshots/issue-002-agent-guide.png`; live JSON assertion above |
 | TBD | public API | catalog/detail/version consistency | pass for legacy skill | ISSUE-001 evidence above |
 | TBD | browser | signed-out deep link | pass after fix | browser-use state captured 2026-07-15 |
 
@@ -113,6 +151,7 @@ that the request completed.
 | Commit | Fix | Regression proof | Live proof |
 |---|---|---|---|
 | `d96e71f` | Serve imported legacy details read-only and align discovery metadata | 28 Vitest files / 219 tests | browse, skill, version, and catalog HTTP 200 |
+| pending | Normalize the MPP token address in the public agent guide | pending | pending |
 
 ## User-story drift register
 
