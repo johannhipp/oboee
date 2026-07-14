@@ -48,11 +48,12 @@ export const v2Error = (args: {
 };
 
 export const statusForCode = (code: string) => {
-  if (code.includes("UNAUTHORIZED") || code === "authentication_required") return 401;
-  if (code.includes("FORBIDDEN") || code.includes("INELIGIBLE") || code.includes("REQUIRED")) return 403;
-  if (code.includes("NOT_FOUND")) return 404;
-  if (code.includes("STALE") || code.includes("CONFLICT") || code.includes("DUPLICATE") || code.includes("IN_PROGRESS")) return 409;
-  if (code.includes("DISABLED") || code.includes("CONFIGURATION")) return 503;
-  if (code.includes("RATE")) return 429;
+  const normalized = code.toUpperCase();
+  if (normalized.includes("UNAUTHORIZED") || code === "authentication_required") return 401;
+  if (normalized.includes("FORBIDDEN") || normalized.includes("INELIGIBLE") || normalized.includes("REQUIRED")) return 403;
+  if (normalized.includes("NOT_FOUND")) return 404;
+  if (normalized.includes("STALE") || normalized.includes("CONFLICT") || normalized.includes("DUPLICATE") || normalized.includes("IN_PROGRESS")) return 409;
+  if (normalized.includes("DISABLED") || normalized.includes("CONFIGURATION")) return 503;
+  if (normalized.includes("RATE")) return 429;
   return 400;
 };
