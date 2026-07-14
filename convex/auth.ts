@@ -9,6 +9,9 @@ import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
 import authSchema from "./betterAuth/schema";
 
+export const API_KEY_DEFAULT_EXPIRES_IN_SECONDS = 90 * 24 * 60 * 60;
+export const API_KEY_METADATA_ENABLED = true;
+
 export const authComponent = createClient<DataModel, typeof authSchema>(components.betterAuth, {
   local: { schema: authSchema },
 });
@@ -33,8 +36,9 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
       passkey(),
       apiKey({
         enableSessionForAPIKeys: true,
+        enableMetadata: API_KEY_METADATA_ENABLED,
         keyExpiration: {
-          defaultExpiresIn: 90 * 24 * 60 * 60 * 1_000,
+          defaultExpiresIn: API_KEY_DEFAULT_EXPIRES_IN_SECONDS,
           minExpiresIn: 1,
           maxExpiresIn: 365,
         },
