@@ -1,7 +1,7 @@
 # Policy-v2 Convex deployment plan
 
-Status: Convex v2 production migration complete; Vercel redeploy is pending a
-fresh personal-profile Google sign-in.
+Status: Convex v2 production migration and Vercel production deployment
+complete; staged rollout gates remain intentionally off.
 
 Date: 2026-07-14
 
@@ -41,10 +41,20 @@ Date: 2026-07-14
   contributions; two immutable skill versions backfilled from existing
   content; and all legacy review scans. Eight review items remain open: two
   missing-skill-version findings and six synthetic-principal findings.
-- Vercel's two public Convex variables have been updated to the `oboe-v2`
-  deployment URLs, but Vercel still needs a new production deployment. The
-  new `OBOE_SERVER_ENVELOPE_SECRET` is not yet present in Vercel because the
-  authenticated browser session expired during the add-variable flow.
+- Vercel's public Convex variables now point to the `oboe-v2` deployment URLs,
+  and `OBOE_SERVER_ENVELOPE_SECRET` is configured in Vercel Production only.
+- Vercel production deployment `oboe-84pmgpfse-t3nseds-projects.vercel.app`
+  completed with status `Ready` from the checked-in v2 branch. The public
+  `www.oboe.sh` and `oboe-alpha.vercel.app` aliases both serve that deployment.
+- Live smoke tests passed on both public aliases: the agent guide and v2
+  OpenAPI return 200 (`apiVersion: v2`, OpenAPI version `2.0.0`, 89 paths),
+  catalog and skill discovery return 200 with two real records, the private
+  obligations endpoint returns a structured 401 without credentials, and the
+  retired `/api/skills` endpoint returns the expected 410 tombstone.
+- Post-deploy Convex verification confirms the migrated counts remain intact:
+  4 access grants, 6 contributions, 10 payment events, 4 payout entries, 4
+  purchases, 4 RFSs, 2 skills, and 2 immutable skill versions. All twelve
+  migration progress rows are complete; the eight review findings remain open.
 
 ## Candidate readiness
 
@@ -160,7 +170,7 @@ confirmed-transfer totals, and the alert snapshot.
 7. Re-run conservation and duplicate-transfer checks. Keep a copy of the
    pre-migration export and migration progress outside the repository.
 
-## Phase 4 — staged rollout (pending Vercel redeploy)
+## Phase 4 — staged rollout (deployment complete; activation pending)
 
 1. `off`: schema and migration code live; no v2 creation.
 2. `shadow`: record scored-assignment comparisons against the deprecated
@@ -189,15 +199,15 @@ authorization bypass, missing evidence ACL, or stuck harmful hold.
 
 ## Remaining execution block
 
-1. Have the operator complete the Google SSO flow in the personal Vercel
-   browser profile.
-2. Add the generated `OBOE_SERVER_ENVELOPE_SECRET` to Vercel Production only,
-   then redeploy the v2 branch. Preserve all existing MPP secret values; never
-   reveal or copy them into the repository.
-3. Verify the production deployment points to
-   `different-clownfish-198.convex.cloud` and smoke-test the public catalog,
-   `/.well-known/oboe-agent.json`, `/api/v2/openapi.json`, v2 read endpoints,
-   auth boundary errors, and legacy route behavior.
-4. Keep v2 `off` until the eight review items, external custody/scanner/KMS
-   configuration, and the Phase 2 lifecycle evidence are reviewed. Do not
-   enable money writes or general availability as part of the Vercel switch.
+1. The personal-profile Google SSO flow, Vercel Production environment update,
+   and v2 production deployment are complete. Existing MPP secret values were
+   preserved and no secret values were written to this plan.
+2. Keep the Convex `policy_v2` flag `off`,
+   `OBOE_MONEY_WRITES_ENABLED=false`, and
+   `OBOE_V2_GENERAL_AVAILABILITY_APPROVED=false` until the eight review items,
+   external custody/scanner/KMS configuration, and Phase 2 lifecycle evidence
+   are reviewed.
+3. The next authorized rollout step is `shadow`, followed by a named,
+   low-value testnet/fake-custody cohort only after divergences and all
+   conservation, duplicate-transfer, auth, evidence-ACL, dispute, hold,
+   retention, and projection alerts are reviewed.
