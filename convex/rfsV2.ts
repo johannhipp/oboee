@@ -14,6 +14,7 @@ import {
   type ContractCriterion,
 } from "./lib/policy";
 import { requirePrincipal } from "./lib/principals";
+import { fallbackAuthorHandle } from "./lib/publicIdentity";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -388,7 +389,7 @@ export const get = query({
         status: rfs.status,
         policyVersion: rfs.policyVersion,
         riskTier: rfs.riskTier,
-        authorHandle: authorProfile?.handle ?? "verified-requester",
+        authorHandle: authorProfile?.handle ?? fallbackAuthorHandle(rfs.authorUserId),
         selectedAuthorHandle: claimantProfile?.handle,
         workEscrowBaseUnits: rfs.workEscrowBaseUnits,
         reviewReserveBaseUnits: rfs.reviewReserveBaseUnits,

@@ -16,6 +16,7 @@ import {
 } from "./lib/helpers";
 import { POLICY_V2 } from "./lib/policy";
 import { retirePolicyV1 } from "./lib/legacy";
+import { fallbackAuthorHandle } from "./lib/publicIdentity";
 
 const catalogStatusValidator = v.union(
   v.literal("open"),
@@ -402,7 +403,7 @@ export const getPublic = query({
       title: rfs.title,
       summary: version.summary,
       tags: version.tags,
-      authorHandle: profile?.handle ?? "verified-author",
+      authorHandle: profile?.handle ?? fallbackAuthorHandle(skill.authorUserId),
       version: version.version,
       contentHash: version.contentHash,
       digestAlgorithm: version.digestAlgorithm,

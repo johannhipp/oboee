@@ -12,6 +12,7 @@ import {
 } from "./lib/reputationPolicy";
 import { basisPoints, POLICY_V2 } from "./lib/policy";
 import { recordPrincipalActivity } from "./lib/activity";
+import { fallbackAuthorHandle } from "./lib/publicIdentity";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -197,20 +198,25 @@ export const publicAuthor = query({
   returns: v.any(),
   handler: async (ctx, args) => {
     const profile = await ctx.db.query("publicProfiles").withIndex("by_handle", (query) => query.eq("handle", args.handle)).unique();
-    if (!profile) return null;
-    const [reputation, sources] = await Promise.all([
-      ctx.db.query("authorReputationSnapshots").filter((query) => query.eq(query.field("principalId"), profile.principalId)).collect(),
-      ctx.db.query("reputationEvents").filter((query) => query.and(query.eq(query.field("subjectType"), "author_tag"), query.eq(query.field("subjectId"), profile.principalId))).take(100),
+    const [publishedSkills, rfs] = await Promise.all([
+      ctx.db.query("skills").filter((query) => query.eq(query.field("status"), "published")).collect(),
+      ctx.db.query("rfs").filter((query) => query.eq(query.field("status"), "published")).collect(),
     ]);
-    const skills = await ctx.db.query("skills").filter((query) => query.eq(query.field("authorUserId"), profile.principalId)).collect();
+    const fallbackPrincipalId = profile?.principalId ?? [...publishedSkills.map((skill) => skill.authorUserId), ...rfs.map((rfsItem) => rfsItem.authorUserId)].find((principalId) => fallbackAuthorHandle(principalId) === args.handle);
+    if (!fallbackPrincipalId) return null;
+    const [reputation, sources] = await Promise.all([
+      ctx.db.query("authorReputationSnapshots").filter((query) => query.eq(query.field("principalId"), fallbackPrincipalId)).collect(),
+      ctx.db.query("reputationEvents").filter((query) => query.and(query.eq(query.field("subjectType"), "author_tag"), query.eq(query.field("subjectId"), fallbackPrincipalId))).take(100),
+    ]);
+    const skills = publishedSkills.filter((skill) => skill.authorUserId === fallbackPrincipalId);
     return {
-      handle: profile.handle,
-      displayName: profile.displayName,
-      bio: profile.bio,
-      links: profile.links,
+      handle: profile?.handle ?? args.handle,
+      displayName: profile?.displayName ?? args.handle,
+      bio: profile?.bio ?? "Public author profile is not configured.",
+      links: profile?.links ?? [],
       reputation: reputation.map((snapshot) => ({ tag: snapshot.tag, score: snapshot.score, adjustedScore: snapshot.adjustedScore, confidence: snapshot.confidence, independentCount: snapshot.independentCount, computedAt: snapshot.computedAt, algorithmVersion: snapshot.algorithmVersion })),
       sourceSummaries: sources.sort((left, right) => right.occurredAt - left.occurredAt).map((source) => ({ tag: source.tag, sourceType: source.sourceType, sourceId: source.sourceId, finalDecisionId: source.finalDecisionId, score: source.score, signalStrengthClass: source.signalStrength >= 0.75 ? "strong" : source.signalStrength >= 0.4 ? "medium" : "light", ageDays: Math.max(0, Math.floor((Date.now() - source.occurredAt) / DAY_MS)), occurredAt: source.occurredAt })),
-      publishedSkills: skills.filter((skill) => skill.status === "published" && skill.publishedVersionId).map((skill) => ({ skillId: skill._id, rfsId: skill.rfsId, summary: skill.summary, tags: skill.tags, publishedVersionId: skill.publishedVersionId })),
+      publishedSkills: skills.filter((skill) => skill.publishedVersionId).map((skill) => ({ skillId: skill._id, rfsId: skill.rfsId, summary: skill.summary, tags: skill.tags, publishedVersionId: skill.publishedVersionId })),
     };
   },
 });

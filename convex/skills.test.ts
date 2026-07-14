@@ -5,6 +5,7 @@ import { convexTest, type TestConvex } from "convex-test";
 import { describe, expect, it } from "vitest";
 
 import { skillCapabilities } from "../src/lib/api-v2/capabilities";
+import { fallbackAuthorHandle } from "./lib/publicIdentity";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -82,5 +83,14 @@ describe("public skill details", () => {
     const projection = await t.run((ctx) => ctx.db.query("discoveryProjection").unique());
     expect(projection).toMatchObject({ skillId, skillVersionId: versionId, policyVersion: 1, algorithmVersion: 2 });
     expect(skillCapabilities(String(skillId), String(versionId), true, false).find((item) => item.action === "purchase")).toMatchObject({ allowed: false });
+  });
+
+  it("resolves a deterministic public author fallback for imported records", async () => {
+    const t = convexTest({ schema, modules });
+    await insertLegacyPublishedSkill(t);
+
+    const author = await t.query(anyApi.reputation.publicAuthor, { handle: fallbackAuthorHandle("user:legacy-author") });
+
+    expect(author).toMatchObject({ handle: fallbackAuthorHandle("user:legacy-author"), publishedSkills: [{ summary: "Imported summary" }] });
   });
 });
