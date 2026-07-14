@@ -24,7 +24,7 @@ regression test, individual commit, and live verification.
 
 ## Current status
 
-| Severity | Open | Fixed and verified |
+| Severity | Open runtime defects | Fixed findings (verification level varies) |
 |---|---:|---:|
 | Critical | 0 | 0 |
 | High | 0 | 3 |
@@ -32,8 +32,10 @@ regression test, individual commit, and live verification.
 | Low | 0 | 2 |
 | **Total** | **0** | **15** |
 
-The prior high-severity detail-page failure is recorded below as fixed. New
-findings are added immediately with reproduction evidence and a commit link.
+The tested public and unauthenticated-negative scope has zero open runtime
+defects. “Fixed” includes findings verified locally, in Convex production, or
+through the live public alias as stated in each record; live authenticated and
+money-bearing workflows remain explicit prerequisites below.
 
 ## Test matrix
 
@@ -60,8 +62,8 @@ findings are added immediately with reproduction evidence and a commit link.
   login session.
 - Convex production push completed to `different-clownfish-198` on 2026-07-15.
 - Vercel production deployment `dpl_CSuZE9Qmk226ZbjiwbUbvohVezmj` reached
-  `READY` and was aliased to `https://www.oboe.sh`; the build completed with
-  Next.js 16.2.10 and the current branch source.
+  `READY` and was aliased to `https://www.oboe.sh`; the public alias serves the
+  deployed frontend build.
 - PR [#9](https://github.com/johannhipp/oboee/pull/9) is ready for review with
   one commit per fix. GitHub currently reports no remote check run for the
   branch; local CI-equivalent gates pass with 37 test files / 244 tests,
@@ -77,7 +79,7 @@ findings are added immediately with reproduction evidence and a commit link.
 | Category | functional / data contract |
 | First observed | 2026-07-14 |
 | Production URL | https://www.oboe.sh/browse/k171xnt1qhqhgpztssg7e8pb858362jb |
-| Fix commit | [`d96e71f`](https://github.com/t3nsed/oboee/commit/d96e71f) |
+| Fix commit | [`d96e71f`](https://github.com/johannhipp/oboee/commit/d96e71f) |
 | Verification | HTTP 200 page/API checks on 2026-07-15; page renders the real skill and read-only policy-v1 notice |
 
 **Reproduction before the fix**
@@ -113,7 +115,7 @@ projections consistent, and denies purchase capabilities for imported records.
 | First observed | 2026-07-15 |
 | Production URL | https://www.oboe.sh/.well-known/oboe-agent.json |
 | Evidence | [`issue-002-agent-guide.png`](production-20260715/screenshots/issue-002-agent-guide.png) and the raw response below |
-| Fix commit | [`8c6cb9d`](https://github.com/t3nsed/oboee/commit/8c6cb9d) |
+| Fix commit | [`8c6cb9d`](https://github.com/johannhipp/oboee/commit/8c6cb9d) |
 | Expected | `payments.token` is a normalized nonzero EVM address with no control characters |
 | Actual | The JSON string ends with `\\n`: `0x20c000000000000000000000b9537d11c60e8b50\\n` |
 
@@ -235,7 +237,7 @@ takeover path.
 | Severity | medium — fixed and verified |
 | Category | functional / capability contract |
 | Evidence | Anonymous content request returned 401 while skill detail advertised `read_content.allowed:true` without an entitlement prerequisite |
-| Fix commit | [`75095e7`](https://github.com/t3nsed/oboee/commit/75095e7) |
+| Fix commit | [`75095e7`](https://github.com/johannhipp/oboee/commit/75095e7) |
 
 The capability now explicitly states `authenticated_and_granted`; the protected
 route remains available to an authenticated principal with a valid grant, while
@@ -248,7 +250,7 @@ anonymous agents no longer have to infer the boundary from a failed request.
 | Severity | medium — fixed and verified |
 | Category | functional / API contract |
 | Evidence | `GET /api/v2/skills/not-a-skill-id` and other public resource reads returned generic 400 `request_failed` |
-| Fix commit | [`d99b200`](https://github.com/t3nsed/oboee/commit/d99b200) |
+| Fix commit | [`d99b200`](https://github.com/johannhipp/oboee/commit/d99b200) |
 
 Public routes now reject clearly malformed Convex IDs before the database call
 and return the documented 404 `not_found` envelope. Valid-looking unknown IDs
@@ -261,7 +263,7 @@ still reach Convex and resolve according to resource existence.
 | Severity | medium — fixed and verified |
 | Category | functional / pagination contract |
 | Evidence | `GET /api/v2/catalog?limit=abc` returned 200 with an empty page and `nextCursor:"undefined"`; RFS returned generic 400 |
-| Fix commit | [`d99b200`](https://github.com/t3nsed/oboee/commit/d99b200) |
+| Fix commit | [`d99b200`](https://github.com/johannhipp/oboee/commit/d99b200) |
 
 The shared public parser now requires a positive integer, caps safe large
 values at 100, and returns structured 400 for malformed input.
@@ -273,7 +275,7 @@ values at 100, and returns structured 400 for malformed input.
 | Severity | medium — fixed and verified |
 | Category | functional / public read model |
 | Evidence | Catalog/detail fallbacks disagreed (`author-:redteam` vs `verified-author`) and both linked profiles returned 404 |
-| Fix commit | [`c148a47`](https://github.com/t3nsed/oboee/commit/c148a47) |
+| Fix commit | [`c148a47`](https://github.com/johannhipp/oboee/commit/c148a47) |
 
 Catalog, skill detail, RFS detail, and the author query now share a deterministic
 fallback handle and can resolve a public profile projection when a legacy row
@@ -286,7 +288,7 @@ has no `publicProfiles` record.
 | Severity | medium — fixed and verified |
 | Category | compatibility / migration contract |
 | Evidence | `/api/v1/*` returned HTML 404 and `GET /api/rfs` returned 405 despite the manifest promising 410 retirement |
-| Fix commit | [`c266937`](https://github.com/t3nsed/oboee/commit/c266937) |
+| Fix commit | [`c266937`](https://github.com/johannhipp/oboee/commit/c266937) |
 
 The v1 root/catch-all and unversioned RFS collection GET now return the same
 machine-readable `api_version_retired` 410 envelope with migration links.
@@ -298,7 +300,7 @@ machine-readable `api_version_retired` 410 envelope with migration links.
 | Severity | low — fixed and verified |
 | Category | documentation / generated-client contract |
 | Evidence | Live catalog/skills/RFS filters were absent from `parameters`, and protected reads/commands omitted 401/409 responses |
-| Fix commit | [`2e3470b`](https://github.com/t3nsed/oboee/commit/2e3470b) |
+| Fix commit | [`2e3470b`](https://github.com/johannhipp/oboee/commit/2e3470b) |
 
 The generated OpenAPI now documents the catalog/RFS filters, limit rules, and
 the authentication/conflict/rate-limit statuses used by the handlers.
@@ -310,7 +312,7 @@ the authentication/conflict/rate-limit statuses used by the handlers.
 | Severity | medium — fixed and live-verified |
 | Category | functional / API boundary |
 | Evidence | 32-character IDs with the wrong Convex table prefix returned generic 400 `request_failed` on public skill, review, fixture, recovery, RFS, evaluation, evidence, and settlement reads |
-| Fix commit | [`d617148`](https://github.com/t3nsed/oboee/commit/d617148) |
+| Fix commit | [`d617148`](https://github.com/johannhipp/oboee/commit/d617148) |
 
 The HTTP regex check from `d99b200` correctly rejected obviously malformed IDs,
 but a syntactically shaped ID could still fail inside Convex's table-specific
@@ -329,7 +331,7 @@ ID across all affected public resources: no `request_failed` or 5xx responses.
 | Severity | low — fixed and live-verified |
 | Category | functional / web-agent contract |
 | Evidence | `/browse?q=zzzzzz` continued to show published skills, and the copyable agent handoff emitted `/api/v2/catalog?q=...` although OpenAPI has no free-text parameter |
-| Fix commit | [`9117eb3`](https://github.com/t3nsed/oboee/commit/9117eb3) |
+| Fix commit | [`9117eb3`](https://github.com/johannhipp/oboee/commit/9117eb3) |
 
 The web filter now applies to both loaded projections. The agent handoff keeps
 only supported catalog filters and explicitly labels free-text search as a
