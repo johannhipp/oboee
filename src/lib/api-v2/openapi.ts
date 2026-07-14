@@ -38,6 +38,23 @@ const rfsParameters = [
   queryParameter("status", "Filter by public RFS status.", { type: "string", enum: ["open", "funded", "assigned", "submitted", "evaluation_open", "revision_requested", "disputed", "published", "rejected", "cancelled", "fulfilled"] }),
   queryParameter("limit", "Positive page size; values above 100 are capped.", { type: "integer", minimum: 1, maximum: 100, default: 25 }),
 ];
+const evidenceUploadRequest = {
+  type: "object",
+  required: ["file", "skillVersionId", "classification", "proofManifest", "proofSignature", "signingKeyId"],
+  properties: {
+    file: { type: "string", format: "binary", description: "Encrypted by the server after upload; maximum 10 MiB plaintext." },
+    skillVersionId: { type: "string" },
+    criterionId: { type: "string" },
+    evaluationId: { type: "string" },
+    classification: { type: "string", enum: ["public", "restricted"] },
+    restrictionReason: { type: "string", enum: ["private_source", "live_exploit", "credentials", "coordinated_disclosure"] },
+    publicRedaction: { type: "string" },
+    proofManifest: { type: "string" },
+    proofSignature: { type: "string" },
+    signingKeyId: { type: "string" },
+  },
+};
+const multipartCommand = (summary: string, requestBody: Record<string, unknown>) => ({ ...command(summary), requestBody: { required: true, content: { "multipart/form-data": { schema: requestBody } } } });
 const read = (summary: string, authenticated = false, parameters: Record<string, unknown>[] = []) => ({ summary, ...(parameters.length ? { parameters } : {}), responses: { "200": { description: "Success", content: { "application/json": { schema: { $ref: "#/components/schemas/Success" } } } }, "404": { description: "Not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, ...(authenticated ? { "401": { description: "Authentication required", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } : {}) }, ...(authenticated ? { security: [{ apiKey: [] }, { cookieSession: [] }] } : {}) });
 
 const paths: Record<string, Record<string, unknown>> = {
@@ -75,7 +92,7 @@ const paths: Record<string, Record<string, unknown>> = {
   "/api/v2/rfs/{rfsId}/evaluation-workspace": { get: read("Authorized evaluation workspace", true) },
   "/api/v2/rfs/{rfsId}/evaluations": { get: read("Public evaluation projection"), post: command("Submit criterion results", evaluationSchema) },
   "/api/v2/rfs/{rfsId}/evaluations/{evaluationId}/supersede": { post: command("Supersede an evaluation", evaluationSchema.omit({ skillVersionId: true, targetEnvironment: true, narrativeRating: true })) },
-  "/api/v2/rfs/{rfsId}/evidence/upload-intents": { post: command("Upload encrypted proof evidence") },
+  "/api/v2/rfs/{rfsId}/evidence/upload-intents": { post: multipartCommand("Upload encrypted proof evidence", evidenceUploadRequest) },
   "/api/v2/rfs/{rfsId}/evidence": { get: read("Public evidence projections") },
   "/api/v2/evidence/{artifactId}/download": { get: read("Controlled evidence download", true) },
   "/api/v2/rfs/{rfsId}/disputes": { get: read("Disputes", true), post: command("Open an evidence-backed dispute") },

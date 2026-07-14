@@ -19,4 +19,10 @@ describe("v2 OpenAPI contract", () => {
     expect(purchaseResponses).toHaveProperty("409");
     expect(contentResponses).toHaveProperty("401");
   });
+
+  it("documents the multipart evidence upload boundary", () => {
+    const upload = openApiDocument.paths["/api/v2/rfs/{rfsId}/evidence/upload-intents"].post as { requestBody: { content: Record<string, { schema: { properties: Record<string, unknown> } }> } };
+
+    expect(upload.requestBody.content["multipart/form-data"].schema.properties.file).toMatchObject({ type: "string", format: "binary" });
+  });
 });
