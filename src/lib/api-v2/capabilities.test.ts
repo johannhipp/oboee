@@ -7,6 +7,6 @@ describe("skill safety capabilities", () => {
     const capabilities = skillCapabilities("skill_1", "version_1", false, true);
 
     expect(capabilities.find((item) => item.action === "purchase")).toMatchObject({ allowed: false });
-    expect(capabilities.find((item) => item.action === "read_content")).toMatchObject({ allowed: false });
+    expect(capabilities.find((item) => item.action === "read_content")).toMatchObject({ allowed: false, precondition: "authenticated_and_granted" });
   });
 });
