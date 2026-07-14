@@ -1,0 +1,4 @@
+ts	phase	decision	why	evidence	result
+2026-07-14T22:15:25Z	frame	started an append-only production QA pass on the existing v2 branch	the user asked for extensive testing, per-fix commits, a large PR, and CI checks	git d96e71f; docs/qa/production-dogfood-20260715.md	branch clean; no PR existed
+2026-07-14T22:15:25Z	harness	used browser-use as the dogfood browser fallback	agent-browser is unavailable in this environment, while browser-use is installed and can capture live page state	command -v agent-browser; browser-use doctor	browser fallback selected
+2026-07-14T22:15:25Z	baseline	kept policy-v2 activation and money writes off during QA	production data and custody fixtures are not a license to create financial side effects	production feature flags; prior deployment plan	safe read-only/negative testing boundary
