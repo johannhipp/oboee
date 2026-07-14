@@ -1,7 +1,8 @@
 # Policy-v2 Convex deployment plan
 
-Status: Convex v2 production migration and Vercel production deployment
-complete; staged rollout gates remain intentionally off.
+Status: Convex v2 production migration, legacy-detail compatibility fix, and
+Vercel production deployment complete; staged rollout gates remain intentionally
+off.
 
 Date: 2026-07-14
 
@@ -44,13 +45,27 @@ Date: 2026-07-14
 - Vercel's public Convex variables now point to the `oboe-v2` deployment URLs,
   and `OBOE_SERVER_ENVELOPE_SECRET` is configured in Vercel Production only.
 - Vercel production deployment `oboe-84pmgpfse-t3nseds-projects.vercel.app`
-  completed with status `Ready` from the checked-in v2 branch. The public
-  `www.oboe.sh` and `oboe-alpha.vercel.app` aliases both serve that deployment.
+  completed with status `Ready` from the checked-in v2 branch. The follow-up
+  compatibility deployment `oboe-ko85gpats-t3nseds-projects.vercel.app` is also
+  `Ready`, and the public `www.oboe.sh` alias serves it.
 - Live smoke tests passed on both public aliases: the agent guide and v2
   OpenAPI return 200 (`apiVersion: v2`, OpenAPI version `2.0.0`, 89 paths),
   catalog and skill discovery return 200 with two real records, the private
   obligations endpoint returns a structured 401 without credentials, and the
   retired `/api/skills` endpoint returns the expected 410 tombstone.
+- The first live detail check exposed a contract mismatch: the v2 discovery
+  projection included imported policy-v1 skills, while `skills.getPublic`
+  rejected those same records. The root fix now validates the skill/version
+  pair against either policy-v2 or an explicitly `legacyImported` policy-v1
+  pair, preserves the source `policyVersion`, removes unsupported stale
+  projections during refresh, and denies purchase capabilities for imported
+  records. The exact browse page and API endpoints now return 200 with the
+  real skill data and an explicit read-only policy-v1 notice.
+- After the fix, the production discovery refresh reported `refreshed: 2`;
+  both projections have `algorithmVersion: 2` and `policyVersion: 1`. The
+  exact skill endpoint, exact version endpoint, catalog, and browse page all
+  return HTTP 200. The temporary one-hour Vercel deploy token was revoked after
+  the production publish.
 - Post-deploy Convex verification confirms the migrated counts remain intact:
   4 access grants, 6 contributions, 10 payment events, 4 payout entries, 4
   purchases, 4 RFSs, 2 skills, and 2 immutable skill versions. All twelve
@@ -62,10 +77,10 @@ The v2 branch passed in an isolated worktree:
 
 ```text
 npm ci --include=dev   pass
-npm run lint           pass
+npm run lint           pass with two pre-existing generated-file warnings
 npm run typecheck      pass
-npm test               pass — 27 files, 218 tests
-npm run build          pass
+npm test               pass — 28 files, 219 tests
+npm run build          pass — Vercel production build
 ```
 
 The two EOF whitespace issues were fixed in the deployment branch. The full

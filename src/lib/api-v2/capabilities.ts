@@ -25,9 +25,9 @@ export const rfsCapabilities = (id: string, status?: string): Capability[] => [
   capability("settlement", "GET", `/api/v2/rfs/${id}/settlement`, { requiredPermission: "settlement:read", idempotencyRequired: false }),
 ];
 
-export const skillCapabilities = (id: string, versionId?: string, available = true): Capability[] => [
+export const skillCapabilities = (id: string, versionId?: string, available = true, purchasable = true): Capability[] => [
   capability("read", "GET", `/api/v2/skills/${id}`, { idempotencyRequired: false }),
-  capability("purchase", "POST", `/api/v2/skills/${id}/purchase-intents`, { requiredPermission: "purchase", allowed: available && Boolean(versionId), precondition: "verified_wallet" }),
+  capability("purchase", "POST", `/api/v2/skills/${id}/purchase-intents`, { requiredPermission: "purchase", allowed: purchasable && available && Boolean(versionId), precondition: "verified_wallet" }),
   capability("read_content", "GET", `/api/v2/skills/${id}/versions/${versionId ?? "{versionId}"}/content`, { requiredPermission: "skills:read", idempotencyRequired: false, allowed: available && Boolean(versionId) }),
   capability("review", "POST", `/api/v2/skills/${id}/reviews`, { requiredPermission: "evaluate", allowed: available && Boolean(versionId), precondition: "redeemed_exact_version_grant" }),
 ];

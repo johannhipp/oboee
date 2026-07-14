@@ -50,9 +50,10 @@ export default async function MarketplaceDetail({ params }: { params: Promise<{ 
 
   if (resource.kind === "skill") {
     const skill = resource.data;
-    const purchase = skillCapabilities(skill.id, skill.versionId, skill.quarantineState === "clear").find((item) => item.action === "purchase")!;
+    const purchase = skillCapabilities(skill.id, skill.versionId, skill.quarantineState === "clear", !skill.legacyImported).find((item) => item.action === "purchase" && item.allowed);
     return (
       <article className="mx-auto max-w-4xl py-8">
+        {skill.legacyImported ? <div role="status" className="mb-5 border border-amber-700 bg-amber-50 p-4 text-sm text-amber-950"><strong className="block font-mono uppercase">Imported policy-v1 content</strong>This historical record is read-only until a policy-v2 version is published.</div> : null}
         {skill.quarantineState !== "clear" ? <div role="alert" className="mb-5 border-2 border-red-700 bg-red-50 p-4 text-sm text-red-900"><strong className="block font-mono uppercase">{skill.quarantineState}</strong>This version must not be purchased or executed until the hold is resolved.</div> : null}
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <div>
@@ -61,6 +62,7 @@ export default async function MarketplaceDetail({ params }: { params: Promise<{ 
             <p className="mt-3 text-sm leading-6 text-muted-foreground">{skill.summary}</p>
             <dl className="mt-6">
               <Definition label="author" value={<Link href={`/authors/${skill.authorHandle}`} className="underline">@{skill.authorHandle}</Link>} />
+              <Definition label="policy" value={`v${skill.policyVersion}`} />
               <Definition label="content digest" value={<code>{skill.digestAlgorithm}:{skill.contentHash}</code>} />
               <Definition label="price" value={`${skill.purchasePriceBaseUnits} base units`} />
               <Definition label="verified installs" value={skill.uniqueVerifiedInstalls} />
@@ -71,7 +73,7 @@ export default async function MarketplaceDetail({ params }: { params: Promise<{ 
             {skill.reviews.map((review) => <div key={review.reviewId} className="border-b border-border py-4"><div className="flex justify-between gap-3 font-mono text-xs"><Link href={`/reviews/${review.reviewId}`} className="underline">{review.rating}/5 · {review.outcome}</Link><span>{review.state}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{review.text}</p></div>)}
             {skill.reviews.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No public reviews yet.</p> : null}
           </div>
-          <aside><h2 className="mb-2 font-mono text-xs uppercase text-muted-foreground">Use with an agent</h2><CopyBox text={resourceHandoff({ kind: "skill", id: skill.id, versionId: skill.versionId })} /><SkillPurchaseAction capability={purchase} skillVersionId={skill.versionId} /><Link href={`/browse/${skill.rfsId}`} className="mt-4 inline-block font-mono text-xs underline">source RFS</Link></aside>
+          <aside><h2 className="mb-2 font-mono text-xs uppercase text-muted-foreground">Use with an agent</h2><CopyBox text={resourceHandoff({ kind: "skill", id: skill.id, versionId: skill.versionId })} />{purchase ? <SkillPurchaseAction capability={purchase} skillVersionId={skill.versionId} /> : <p className="mt-4 text-sm text-muted-foreground">Purchases are unavailable for imported policy-v1 content.</p>}<Link href={`/browse/${skill.rfsId}`} className="mt-4 inline-block font-mono text-xs underline">source RFS</Link></aside>
         </div>
       </article>
     );

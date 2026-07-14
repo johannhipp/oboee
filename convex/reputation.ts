@@ -15,6 +15,12 @@ import { recordPrincipalActivity } from "./lib/activity";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
+const isDiscoverableSkillVersion = (skill: Doc<"skills">, version: Doc<"skillVersions">) => {
+  if (version.skillId !== skill._id || version.status !== "published") return false;
+  if (skill.policyVersion === POLICY_V2.version && version.policyVersion === POLICY_V2.version) return true;
+  return skill.policyVersion === 1 && version.policyVersion === 1 && version.legacyImported === true;
+};
+
 const clusterFor = async (ctx: MutationCtx, principalId: string) => {
   const memberships = await ctx.db.query("identityClusterMemberships").withIndex("by_principal", (query) => query.eq("principalId", principalId)).collect();
   const membership = memberships.find((item) => item.activeUntil === undefined);
@@ -126,9 +132,17 @@ export const refreshDiscovery = internalMutation({
   handler: async (ctx, args) => {
     const now = args.now ?? Date.now();
     const skills = await ctx.db.query("skills").withIndex("by_status", (query) => query.eq("status", "published")).collect();
+    const eligibleSkills: Array<{ skill: Doc<"skills">; version: Doc<"skillVersions"> }> = [];
     const rawAdoption = new Map<string, number>();
     for (const skill of skills) {
       if (!skill.publishedVersionId) continue;
+      const version = await ctx.db.get(skill.publishedVersionId);
+      if (!version || !isDiscoverableSkillVersion(skill, version)) {
+        const staleProjection = await ctx.db.query("discoveryProjection").withIndex("by_skill", (query) => query.eq("skillId", skill._id)).unique();
+        if (staleProjection) await ctx.db.delete(staleProjection._id);
+        continue;
+      }
+      eligibleSkills.push({ skill, version });
       const installs = await ctx.db.query("installEvents").withIndex("by_skillVersion", (query) => query.eq("skillVersionId", skill.publishedVersionId!)).collect();
       const byCluster = new Map<string, number>();
       for (const install of installs.filter((item) => item.redeemedAt >= now - 180 * DAY_MS)) {
@@ -140,14 +154,12 @@ export const refreshDiscovery = internalMutation({
     const adoptionValues = [...rawAdoption.values()].sort((left, right) => left - right);
     const p95 = adoptionValues.length ? adoptionValues[Math.min(adoptionValues.length - 1, Math.floor(adoptionValues.length * 0.95))] : 1;
     let refreshed = 0;
-    for (const skill of skills) {
-      if (!skill.publishedVersionId || skill.quarantineState === "quarantined") continue;
-      const [version, snapshots, profile] = await Promise.all([
-        ctx.db.get(skill.publishedVersionId),
+    for (const { skill, version } of eligibleSkills) {
+      if (skill.quarantineState === "quarantined") continue;
+      const [snapshots, profile] = await Promise.all([
         ctx.db.query("skillQualitySnapshots").withIndex("by_skillVersion_and_tag", (query) => query.eq("skillVersionId", skill.publishedVersionId!)).collect(),
         ctx.db.query("publicProfiles").withIndex("by_principal", (query) => query.eq("principalId", skill.authorUserId)).unique(),
       ]);
-      if (!version) continue;
       const quality = snapshots.length ? Math.floor(snapshots.reduce((sum, item) => sum + item.adjustedScore * 100, 0) / snapshots.length) : 5_000;
       const confidence = confidenceForCount(snapshots.reduce((sum, item) => sum + item.independentCount, 0));
       const independentCount = snapshots.reduce((sum, item) => sum + item.independentCount, 0);
@@ -155,7 +167,7 @@ export const refreshDiscovery = internalMutation({
       const recency = recencyBps(Math.max(0, (now - (version.publishedAt ?? version.submittedAt)) / DAY_MS));
       const total = discoveryScoreBps({ qualityBps: basisPoints(quality), adoptionBps: adoption, recencyBps: recency });
       const existing = await ctx.db.query("discoveryProjection").withIndex("by_skill", (query) => query.eq("skillId", skill._id)).unique();
-      const values = { skillId: skill._id, skillVersionId: version._id, category: skill.tags[0] ?? "general", tags: skill.tags, authorHandle: profile?.handle ?? `author-${skill.authorUserId.slice(-8)}`, qualityBps: quality, adoptionBps: adoption, recencyBps: recency, totalBps: total, confidence, independentCount, quarantineState: skill.quarantineState ?? "clear" as const, publishedAt: version.publishedAt ?? version.submittedAt, computedAt: now, algorithmVersion: 2, policyVersion: POLICY_V2.version };
+      const values = { skillId: skill._id, skillVersionId: version._id, category: skill.tags[0] ?? "general", tags: skill.tags, authorHandle: profile?.handle ?? `author-${skill.authorUserId.slice(-8)}`, qualityBps: quality, adoptionBps: adoption, recencyBps: recency, totalBps: total, confidence, independentCount, quarantineState: skill.quarantineState ?? "clear" as const, publishedAt: version.publishedAt ?? version.submittedAt, computedAt: now, algorithmVersion: 2, policyVersion: version.policyVersion ?? skill.policyVersion ?? POLICY_V2.version };
       if (existing) await ctx.db.patch(existing._id, values); else await ctx.db.insert("discoveryProjection", values);
       refreshed += 1;
     }
