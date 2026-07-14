@@ -62,6 +62,10 @@ findings are added immediately with reproduction evidence and a commit link.
 - Vercel production deployment `dpl_CSuZE9Qmk226ZbjiwbUbvohVezmj` reached
   `READY` and was aliased to `https://www.oboe.sh`; the build completed with
   Next.js 16.2.10 and the current branch source.
+- PR [#9](https://github.com/johannhipp/oboee/pull/9) is ready for review with
+  one commit per fix. GitHub currently reports no remote check run for the
+  branch; local CI-equivalent gates pass with 37 test files / 244 tests,
+  typecheck, build, and lint (two generated-file warnings only).
 
 ## Findings
 
