@@ -44,6 +44,30 @@ those human-only actions.
 All acceptance criteria below describe the target behavior, including for
 Foundation stories.
 
+## Live implementation alignment (2026-07-15)
+
+The production QA pass on `www.oboe.sh` and the current Convex policy-v2
+deployment found that several stories described planned behavior rather than a
+reachable surface. The rows below are the authoritative scope until those
+surfaces are intentionally implemented:
+
+- Discovery is currently two coordinated public projections: `/api/v2/catalog`
+  for published skills and `/api/v2/rfs` for active requests. They share the
+  same public safety and pagination conventions, but there is not yet one
+  server-side unified text-search endpoint.
+- Public capability lists are status-oriented and identify protected content
+  prerequisites; they are not principal-specific entitlement projections until
+  a request carries an authenticated identity.
+- Policy-v1 and unversioned business routes are retired with machine-readable
+  `410 api_version_retired` responses. They are not compatibility paths.
+- Money-bearing policy-v2 remains feature-gated and disabled in production;
+  this is a rollout prerequisite, not a claim that the money lifecycle is
+  enabled.
+- High-value assignment confirmation, full wallet rotation/revocation history,
+  and prebroadcast destination correction remain explicit implementation
+  prerequisites. The multipart evidence request contract is now documented;
+  positive storage/upload verification still requires authenticated fixtures.
+
 ## Actors
 
 One BetterAuth principal may act in several roles, but role and eligibility are
@@ -225,16 +249,21 @@ Acceptance criteria:
 
 ### Discovery and selection
 
-#### A-DIS-01 - Search the unified catalog `[Foundation -> Evolve, P0]`
+#### A-DIS-01 - Search the coordinated public projections `[Foundation -> Evolve, P1]`
 
-As a consumer or requesting agent, I want one catalog for published skills and
-active RFSs so that I can decide whether to consume, fund, or create.
+As a consumer or requesting agent, I want consistent public projections for
+published skills and active RFSs so that I can decide whether to consume, fund,
+or create.
 
 Acceptance criteria:
 
-- Search supports text, required tags, status, author, and cursor pagination.
+- The skill catalog supports category, required tags, author, cursor, and
+  bounded limit filters; RFS listing supports status and bounded limit filters.
+- A future unified text-search endpoint may combine both projections without
+  changing the resource-specific contracts.
 - Public metadata never includes protected skill content or restricted evidence.
-- Agent and web results come from the same indexed projection.
+- Agent and web results use the same public projections for their respective
+  resource type.
 
 #### A-DIS-02 - Rank by useful quality and adoption `[New, P1]`
 
@@ -363,16 +392,19 @@ Acceptance criteria:
 - Evidence distinguishes `unable_to_apply`, `no_effect`, `improved`, `resolved`,
   and `harmful` outcomes.
 
-#### A-USE-06 - Handle a quarantined version `[New, P0]`
+#### A-USE-06 - Handle a held or quarantined version `[New, P0]`
 
-As an agent with an existing grant, I want a clear quarantine response and safe
-version fallback so that I do not unknowingly run a version under harmful review.
+As an agent with an existing grant, I want a clear safety-hold response so that
+I do not unknowingly run a version under harmful review.
 
 Acceptance criteria:
 
 - New purchases and affected future sale payouts pause immediately.
-- The latest prior nonquarantined version is offered only when contractually and
-  technically valid; otherwise access pauses.
+- New purchases, confirmed purchases, redemption, and future sale payouts are
+  blocked for both `held` and `quarantined` state.
+- A safe fallback may be referenced by the public model only when explicitly
+  recorded and clean; exact-version redemption never silently substitutes
+  different content.
 - The public item shows a redacted reason and review state without exposing the
   restricted exploit.
 
@@ -688,6 +720,8 @@ Acceptance criteria:
 - AES-256-GCM envelope encryption protects raw artifacts at rest.
 - Malware/content scanning controls serving, while independent reproduction
   controls evidence validity.
+- The v2 OpenAPI contract describes the multipart request fields, binary file
+  part, and upload-size limits.
 
 #### A-EVAL-06 - Submit criterion-level results `[Foundation -> Evolve, P0]`
 
@@ -942,8 +976,9 @@ perform so that I do not infer behavior from status names.
 
 Acceptance criteria:
 
-- Capabilities account for policy version, identity, role, entitlement,
-  deadlines, holds, and settlement state.
+- Public capabilities account for policy version, lifecycle status, holds, and
+  protected-content prerequisites. Principal-specific role and entitlement
+  capabilities are returned by authenticated workspaces.
 - A capability that is false has a stable reason where disclosure is safe.
 - Human UI controls use the same capabilities.
 
@@ -955,7 +990,8 @@ transfers.
 
 Acceptance criteria:
 
-- Every write accepts or derives an immutable idempotency key.
+- Every v2 command and recovery write accepts or derives an immutable
+  idempotency key.
 - Same key/same payload returns the original result.
 - Same key/different payload returns `409` without changing state.
 
@@ -980,7 +1016,8 @@ advance a workflow.
 Acceptance criteria:
 
 - Scheduled internal functions own time-based transitions.
-- Client reads and status checks never trigger money movement.
+- Client reads and status checks never trigger money movement; recovery status
+  is a query rather than a mutation.
 - Responses include relevant deadlines and last-updated/projected timestamps.
 
 #### A-API-05 - Resume after interruption `[New, P1]`
@@ -1137,17 +1174,22 @@ Acceptance criteria:
 - The UI explains permissions in outcome terms, not implementation jargon.
 - Platform roles and privileged human actions cannot be delegated by key.
 
-#### H-OWN-03 - Verify and manage wallets `[Evolve, P0]`
+#### H-OWN-03 - Verify and manage wallets `[Evolve, P1]`
 
 As an owner, I want to prove and manage wallet ownership so that agent payments,
 refunds, and payouts use destinations I control.
 
+Current shipped scope is wallet challenge/confirmation, listing, and primary
+wallet selection. Explicit rotation/revocation-history and prebroadcast
+destination-correction commands are not yet exposed in v2.
+
 Acceptance criteria:
 
 - Linking requires a signed challenge.
-- Multiple wallets, primary status, rotation, and revocation history are visible.
-- A payout destination correction requires recent passkey auth and is impossible
-  after broadcast.
+- Multiple wallets and primary status are visible; adding a new verified wallet
+  is the current rotation path.
+- Destination correction remains a documented future human-only operation and
+  is not represented as available until its prebroadcast audit path exists.
 
 #### H-OWN-04 - Oversee my agents' activity `[Foundation -> Evolve, P1]`
 
@@ -1283,11 +1325,15 @@ Acceptance criteria:
 - Direct storage URLs and wrapping keys are never shown.
 - Artifacts are downloaded as attachments after quarantine/scan policy passes.
 
-#### H-REV-04 - Confirm a high-value assignment `[New, P0]`
+#### H-REV-04 - Confirm a high-value assignment `[New, P0 — gated, not yet exposed]`
 
 As a human reviewer, I want to confirm the top algorithmic candidate or reject
 only an enumerated factual disqualification so that high-value work receives
 oversight without discretionary favoritism.
+
+Current Convex policy creates the human action, but the v2 API/OpenAPI/UI do
+not yet expose the dedicated confirmation operation. This story remains a
+pre-rollout blocker for high-value assignment and is not counted as shipped.
 
 Acceptance criteria:
 
@@ -1573,14 +1619,16 @@ stories complete:
 | `/new` | Human RFS draft | Agent-primary structured criteria/fixture/economics contract |
 | `/me` | Requests, contributions, purchases, wallet | Keys, verified wallets, applications, reviews, bonds, obligations, active decisions |
 | `/docs` and `/SKILL.md` | Human/API orientation and agent entry | API-key identity, v2 lifecycle, evidence, idempotency, settlement, safety |
-| `GET /api/skills` | Agent discovery | Cursor pagination and shared 45/45/10 ranking |
+| `GET /api/v2/catalog` | Published-skill discovery | Bounded category/tag/author/cursor filters and shared 45/45/10 ranking |
+| `GET /api/v2/rfs` | Active-request discovery | Status and bounded-limit projection; a future unified search may combine it with the catalog |
+| `GET /api/v2/skills/{skillId}` | Exact public skill detail | Imported policy-v1 read-only details, digest, safety state, and author link |
 | `GET /api/skills/[id]/content` | Paid/entitled access | Authenticated grants, exact version digest, install redemption, quarantine |
 | `POST /api/rfs` | Create request | Immutable criteria, fixtures, policy, deadlines, economics |
 | `POST /api/rfs/[id]/fund` | Crowdfunding | Verified principal/wallet, canonical intent, receipt-bound internal ingestion |
-| `POST /api/rfs/[id]/claim` | Fulfiller entry | Replace with scored applications; keep only policy-v1 compatibility |
+| `POST /api/v2/rfs/{rfsId}/applications` | Fulfiller entry | Scored, evidence-planned applications; policy-v1 claim routes are retired with 410 |
 | `POST /api/rfs/[id]/submit` | Immutable version and evaluation opening | SHA-256 contract binding and protected publication projection |
 | Evaluation/dispute routes | Backer/requester review and hold | Criterion proof, server-derived role/trust/cluster, durable human resolution |
-| Payout claim route | Author payout state | Replace client claim with obligation/outbox/confirmed receipt status |
+| Payout claim route | Author payout state | Policy-v1 claim route is retired; use obligation/outbox/confirmed receipt status |
 
 ## Explicit non-stories
 
