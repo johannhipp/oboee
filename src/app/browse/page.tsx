@@ -33,6 +33,7 @@ export default async function BrowsePage({ searchParams }: { searchParams: Promi
   }
   const query = params.q?.trim().toLowerCase();
   const visibleRequests = requests.filter((item) => !query || `${item.title} ${item.description} ${item.scope} ${item.tags.join(" ")}`.toLowerCase().includes(query));
+  const visibleSkills = skills.items.filter((item) => !query || `${item.category} ${item.tags.join(" ")} ${item.authorHandle}`.toLowerCase().includes(query));
 
   return (
     <section className="mx-auto max-w-4xl py-8">
@@ -58,8 +59,8 @@ export default async function BrowsePage({ searchParams }: { searchParams: Promi
           {!unavailable && visibleRequests.length === 0 ? <p className="border-b border-border py-6 text-sm text-muted-foreground">No matching requests.</p> : null}
 
           <h2 className="mb-2 mt-8 font-mono text-xs uppercase text-muted-foreground">Published skills</h2>
-          {skills.items.map((item) => <MarketplaceRow key={item.id} item={{ id: item.id, kind: "skill", title: item.category, status: item.quarantineState, tags: item.tags, authorHandle: item.authorHandle, scoreBps: item.totalBps, confidence: item.confidence }} />)}
-          {!unavailable && skills.items.length === 0 ? <p className="border-b border-border py-6 text-sm text-muted-foreground">No matching published skills.</p> : null}
+          {visibleSkills.map((item) => <MarketplaceRow key={item.id} item={{ id: item.id, kind: "skill", title: item.category, status: item.quarantineState, tags: item.tags, authorHandle: item.authorHandle, scoreBps: item.totalBps, confidence: item.confidence }} />)}
+          {!unavailable && visibleSkills.length === 0 ? <p className="border-b border-border py-6 text-sm text-muted-foreground">No matching published skills.</p> : null}
           {skills.nextCursor ? <Link className="mt-4 inline-block font-mono text-sm underline" href={{ pathname: "/browse", query: { ...params, cursor: skills.nextCursor } }}>next page</Link> : null}
         </div>
         <aside>
