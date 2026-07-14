@@ -163,10 +163,12 @@ export const proveRecoveryWallet = mutation({
 });
 
 export const getRecoveryStatus = query({
-  args: { requestId: v.id("accountRecoveryRequests"), statusToken: v.string() },
+  args: { requestId: v.string(), statusToken: v.string() },
   returns: v.union(v.null(), v.object({ status: v.string(), coolingOffUntil: v.number(), approvalCount: v.number(), completedAt: v.optional(v.number()), revokedKeyCount: v.optional(v.number()) })),
   handler: async (ctx, args) => {
-    const request = await ctx.db.get(args.requestId);
+    const requestId = ctx.db.normalizeId("accountRecoveryRequests", args.requestId);
+    if (!requestId) return null;
+    const request = await ctx.db.get(requestId);
     if (!request || request.walletProofDigest !== args.statusToken) return null;
     return { status: request.status, coolingOffUntil: request.coolingOffUntil, approvalCount: Number(Boolean(request.firstOperatorPrincipalId)) + Number(Boolean(request.secondOperatorPrincipalId)), completedAt: request.completedAt, revokedKeyCount: request.revokedKeyCount };
   },

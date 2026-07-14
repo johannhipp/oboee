@@ -369,20 +369,25 @@ export const list = query({
 });
 
 export const getVersionMetadata = query({
-  args: { skillId: v.id("skills"), skillVersionId: v.id("skillVersions") },
+  args: { skillId: v.string(), skillVersionId: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const [skill, version] = await Promise.all([ctx.db.get(args.skillId), ctx.db.get(args.skillVersionId)]);
+    const skillId = ctx.db.normalizeId("skills", args.skillId);
+    const skillVersionId = ctx.db.normalizeId("skillVersions", args.skillVersionId);
+    if (!skillId || !skillVersionId) return null;
+    const [skill, version] = await Promise.all([ctx.db.get(skillId), ctx.db.get(skillVersionId)]);
     if (!skill || !version || !isPublicSkillVersion(skill, version)) return null;
     return { skillId: skill._id, skillVersionId: version._id, version: version.version, contentHash: version.contentHash, digestAlgorithm: version.digestAlgorithm, summary: version.summary, tags: version.tags, purchasePriceBaseUnits: version.purchasePriceBaseUnits, quarantineState: version.quarantineState ?? "clear", publishedAt: version.publishedAt, policyVersion: version.policyVersion, legacyImported: version.legacyImported ?? false };
   },
 });
 
 export const getPublic = query({
-  args: { skillId: v.id("skills") },
+  args: { skillId: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const skill = await ctx.db.get(args.skillId);
+    const skillId = ctx.db.normalizeId("skills", args.skillId);
+    if (!skillId) return null;
+    const skill = await ctx.db.get(skillId);
     if (!skill || !skill.publishedVersionId) return null;
     const [version, rfs, profile, qualityRows, installs, reviews] = await Promise.all([
       ctx.db.get(skill.publishedVersionId),
@@ -421,10 +426,12 @@ export const getPublic = query({
 });
 
 export const getInstallAggregate = query({
-  args: { skillId: v.id("skills") },
+  args: { skillId: v.string() },
   returns: v.object({ uniqueVerifiedInstalls: v.number(), weightedAdoptionUnits: v.number() }),
   handler: async (ctx, args) => {
-    const skill = await ctx.db.get(args.skillId);
+    const skillId = ctx.db.normalizeId("skills", args.skillId);
+    if (!skillId) return { uniqueVerifiedInstalls: 0, weightedAdoptionUnits: 0 };
+    const skill = await ctx.db.get(skillId);
     if (!skill?.publishedVersionId) return { uniqueVerifiedInstalls: 0, weightedAdoptionUnits: 0 };
     const installs = await ctx.db.query("installEvents").withIndex("by_skillVersion", (query) => query.eq("skillVersionId", skill.publishedVersionId!)).collect();
     const byCluster = new Map<string, number>();

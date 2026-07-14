@@ -479,10 +479,12 @@ export const getWorkspace = query({
 });
 
 export const listPublic = query({
-  args: { rfsId: v.id("rfs") },
+  args: { rfsId: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const rows = await ctx.db.query("evaluationEvents").withIndex("by_rfs", (query) => query.eq("rfsId", args.rfsId)).collect();
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    if (!rfsId) return [];
+    const rows = await ctx.db.query("evaluationEvents").withIndex("by_rfs", (query) => query.eq("rfsId", rfsId)).collect();
     return await Promise.all(rows.map(async (row) => ({
       evaluationId: row._id, skillVersionId: row.skillVersionId, reviewerRole: row.reviewerType,
       rating: row.rating || undefined, outcome: row.outcome, reviewText: row.reviewText,
@@ -609,12 +611,14 @@ export const appendDisputeEvidence = mutation({
 });
 
 export const listEvents = query({
-  args: { rfsId: v.id("rfs") },
+  args: { rfsId: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    if (!rfsId) return [];
     const [assessment, disputes] = await Promise.all([
-      ctx.db.query("assessmentEvents").withIndex("by_rfs", (query) => query.eq("rfsId", args.rfsId)).collect(),
-      ctx.db.query("disputes").filter((query) => query.eq(query.field("rfsId"), args.rfsId)).collect(),
+      ctx.db.query("assessmentEvents").withIndex("by_rfs", (query) => query.eq("rfsId", rfsId)).collect(),
+      ctx.db.query("disputes").filter((query) => query.eq(query.field("rfsId"), rfsId)).collect(),
     ]);
     const disputeEvents = (await Promise.all(disputes.map(async (dispute) => await ctx.db.query("disputeEvents").withIndex("by_dispute", (query) => query.eq("disputeId", dispute._id)).collect()))).flat();
     return [...assessment.map((event) => ({ type: "assessment", occurredAt: event.occurredAt, state: event.nextState, reason: event.reason })), ...disputeEvents.map((event) => ({ type: "dispute", occurredAt: event.occurredAt, state: event.nextState, reason: event.publicRedaction ?? event.eventType }))].sort((left, right) => left.occurredAt - right.occurredAt);

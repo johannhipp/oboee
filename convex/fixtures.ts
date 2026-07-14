@@ -87,10 +87,12 @@ export const registerVersion = mutation({
 });
 
 export const getMetadata = query({
-  args: { fixtureVersionId: v.id("fixtureVersions") },
+  args: { fixtureVersionId: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const fixture = await ctx.db.get(args.fixtureVersionId);
+    const fixtureVersionId = ctx.db.normalizeId("fixtureVersions", args.fixtureVersionId);
+    if (!fixtureVersionId) return null;
+    const fixture = await ctx.db.get(fixtureVersionId);
     if (!fixture) return null;
     return { fixtureVersionId: fixture._id, visibility: fixture.visibility, version: fixture.version, manifestSha256: fixture.manifestSha256, bundleSha256: fixture.bundleSha256, environmentContract: fixture.environmentContract, createdAt: fixture.createdAt };
   },

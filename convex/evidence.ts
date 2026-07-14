@@ -244,9 +244,13 @@ export const authorizeDownload = mutation({
 });
 
 export const listPublicForRfs = query({
-  args: { rfsId: v.id("rfs") },
+  args: { rfsId: v.string() },
   returns: v.any(),
-  handler: async (ctx, args) => (await ctx.db.query("evidenceArtifacts").withIndex("by_rfs", (query) => query.eq("rfsId", args.rfsId)).collect()).filter((artifact) => !artifact.deletedAt).map((artifact) => ({ artifactId: artifact._id, criterionId: artifact.criterionId, classification: artifact.classification, publicRedaction: artifact.publicRedaction, plaintextSha256: artifact.plaintextSha256, verificationState: artifact.verificationState, scanState: artifact.scanState, mimeType: artifact.mimeType, sizeBytes: artifact.sizeBytes, createdAt: artifact.createdAt })),
+  handler: async (ctx, args) => {
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    if (!rfsId) return [];
+    return (await ctx.db.query("evidenceArtifacts").withIndex("by_rfs", (query) => query.eq("rfsId", rfsId)).collect()).filter((artifact) => !artifact.deletedAt).map((artifact) => ({ artifactId: artifact._id, criterionId: artifact.criterionId, classification: artifact.classification, publicRedaction: artifact.publicRedaction, plaintextSha256: artifact.plaintextSha256, verificationState: artifact.verificationState, scanState: artifact.scanState, mimeType: artifact.mimeType, sizeBytes: artifact.sizeBytes, createdAt: artifact.createdAt }));
+  },
 });
 
 export const deleteExpiredRestricted = internalMutation({
