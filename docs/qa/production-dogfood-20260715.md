@@ -368,6 +368,8 @@ that the request completed.
 | TEST-005 | local/production Convex | identity, money safety, recovery, quarantine | pass for covered fixtures | Focused Convex/API tests plus production deployment to `different-clownfish-198`; money gates remained off |
 | TEST-006 | browser | signed-out deep link | pass after fix | browser-use state and [`browse-live-final.png`](production-20260715/screenshots/browse-live-final.png) captured 2026-07-15 |
 | TEST-007 | browser | browse search behavior | pass | Live `q=zzzzzz` hides both sections; `q=cve` retains both matching skills and removes unsupported API `q` from handoff |
+| TEST-008 | live re-audit | all documented v2 operations and public page routes | pass | Fresh production sweep of all 89 OpenAPI paths / 102 operations returned only 200, expected 400/401/404 responses, and 0 5xx; root, browse, both published-skill details, author, docs, recovery, signed-in workspace, review, and operations page routes rendered without an error marker |
+| TEST-009 | browser | signed-out guarded navigation | pass | Clicking the real `/new` navigation link redirects to `/sign-in?next=%2Fnew`; signed-out `/me` renders the account workspace with a sign-in action. `/new-rfs` was a manually invented, unlinked path and is not an app defect. |
 
 ## Fix ledger
 
