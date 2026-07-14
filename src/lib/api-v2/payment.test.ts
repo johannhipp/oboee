@@ -12,7 +12,7 @@ describe("payment intent authentication boundary", () => {
   it.each([
     ["purchase", () => purchaseIntentRoute(unauthenticatedRequest({ skillVersionId: "version_1" }), "skill_1")],
     ["funding", () => fundingIntentRoute(unauthenticatedRequest({ amountBaseUnits: "100" }), "rfs_1")],
-    ["bond", () => bondIntentRoute(unauthenticatedRequest({ applicationId: "application_1" }))],
+    ["bond", () => bondIntentRoute(unauthenticatedRequest({ applicationId: "application_1" }), "rfs_1")],
   ])("returns 401 before creating a %s intent", async (_name, invoke) => {
     const response = await invoke();
     const payload = await response.json() as { code: string };

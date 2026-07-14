@@ -373,14 +373,14 @@ export const createPurchaseIntent = mutation({
 });
 
 export const createBondIntent = mutation({
-  args: { applicationId: v.id("rfsApplications"), idempotencyKey: v.string() },
+  args: { rfsId: v.id("rfs"), applicationId: v.id("rfsApplications"), idempotencyKey: v.string() },
   returns: intentResultValidator,
   handler: async (ctx, args) => {
     const principal = await requirePrincipal(ctx);
     await requireMoneyPolicy(ctx, principal.principalId);
     const application = await ctx.db.get(args.applicationId);
     const rfs = application ? await ctx.db.get(application.rfsId) : null;
-    if (!application || !rfs || application.principalId !== principal.principalId || application.state !== "selected" || !application.bondRequired || !rfs.currentRevisionId) {
+    if (!application || !rfs || application.rfsId !== args.rfsId || application.principalId !== principal.principalId || application.state !== "selected" || !application.bondRequired || !rfs.currentRevisionId) {
       throw new ConvexError({ code: "INVALID_STATE", message: "A selected bond-required application is required." });
     }
     const [wallet, revision] = await Promise.all([requirePrimaryWallet(ctx, principal.principalId), ctx.db.get(rfs.currentRevisionId)]);

@@ -119,7 +119,7 @@ export const purchaseIntentRoute = async (request: Request, skillId: string) => 
   }
 };
 
-export const bondIntentRoute = async (request: Request) => {
+export const bondIntentRoute = async (request: Request, rfsId: string) => {
   const requestId = request.headers.get("x-request-id")?.trim() || crypto.randomUUID();
   try {
     const authentication = await resolveApiAuthentication(request);
@@ -127,7 +127,7 @@ export const bondIntentRoute = async (request: Request) => {
     const idempotencyKey = request.headers.get("idempotency-key")?.trim();
     if (!idempotencyKey) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
     const body = bondIntentSchema.parse(await request.clone().json());
-    const intent = await fetchPrincipalMutation(anyApi.paymentIntents.createBondIntent, { applicationId: body.applicationId, idempotencyKey }, authentication) as Intent;
+    const intent = await fetchPrincipalMutation(anyApi.paymentIntents.createBondIntent, { rfsId, applicationId: body.applicationId, idempotencyKey }, authentication) as Intent;
     return await paidIntentResponse(request, requestId, intent, authentication);
   } catch (error) {
     if (error instanceof ApiAuthenticationError) {
