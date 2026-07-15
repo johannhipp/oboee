@@ -1,24 +1,26 @@
-import { formatTokenAmount } from "@/lib/view-models"
+import { formatTokenBaseUnits, progressPercent } from "../../shared/domain/money"
 
 interface ProgressBarProps {
-  current: number
-  goal: number
+  current: bigint | string
+  goal: bigint | string
   className?: string
 }
 
 export function ProgressBar({ current, goal, className }: ProgressBarProps) {
-  const pct = goal > 0 ? Math.min(current / goal, 1) : 0
-  const filled = Math.round(pct * 16)
+  const currentBaseUnits = typeof current === "bigint" ? current : BigInt(current)
+  const goalBaseUnits = typeof goal === "bigint" ? goal : BigInt(goal)
+  const pct = progressPercent(currentBaseUnits, goalBaseUnits)
+  const filled = Math.round((pct / 100) * 16)
   const empty = 16 - filled
   const bar = "█".repeat(filled) + "░".repeat(empty)
 
   return (
     <div className={`space-y-1 ${className ?? ""}`}>
       <div className="text-sm font-mono font-medium">
-        ${formatTokenAmount(current)} / ${formatTokenAmount(goal)}
+        ${formatTokenBaseUnits(currentBaseUnits)} / ${formatTokenBaseUnits(goalBaseUnits)}
       </div>
       <div className="text-xs font-mono text-muted-foreground">
-        [{bar}] {Math.round(pct * 100)}%
+        [{bar}] {Math.round(pct)}%
       </div>
     </div>
   )

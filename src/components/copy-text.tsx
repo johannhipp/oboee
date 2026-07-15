@@ -1,25 +1,16 @@
-"use client"
+"use client";
 
-import { useState } from "react"
+import { CopyButton } from "./copy-button";
 
 export function CopyText({ text, className }: { text: string; className?: string }) {
-  const [copied, setCopied] = useState(false)
-
-  function handleCopy() {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className={`max-w-full min-w-0 font-mono text-sm text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer inline-flex items-center gap-2 ${className ?? ""}`}
-      title="copy"
+    <CopyButton
+      text={text}
+      label={`Copy ${text}`}
+      showIcon={false}
+      className={`max-w-full min-w-0 font-mono text-sm text-muted-foreground hover:text-foreground transition-colors duration-150 inline-flex items-center gap-2 ${className ?? ""}`}
     >
       <span className="truncate">{text}</span>
-      <span className="shrink-0 text-xs">{copied ? "copied" : ""}</span>
-    </button>
-  )
+    </CopyButton>
+  );
 }

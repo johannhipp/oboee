@@ -17,8 +17,9 @@ test("public catalog is usable and never exposes paid content", async ({ page, r
 
   const response = await request.get("/api/skills")
   expect(response.ok()).toBe(true)
-  const catalog = (await response.json()) as unknown
-  expect(Array.isArray(catalog)).toBe(true)
+  const catalog = (await response.json()) as { status?: unknown; items?: unknown }
+  expect(catalog.status).toBe("ok")
+  expect(Array.isArray(catalog.items)).toBe(true)
   expect(JSON.stringify(catalog)).not.toContain("contentMarkdown")
 
   await page.goto("/")
@@ -101,7 +102,12 @@ test("signed-in user can save a wallet, create an RFS, and prepare a bound testn
   await expect(page.getByText(/\$0\.00 \/ \$0\.001/)).toBeVisible()
 
   await page.getByLabel("amount in pathUSD").fill("0.001")
-  await page.getByRole("button", { name: "prepare testnet contribution" }).click()
+  const prepareContribution = page.getByRole("button", {
+    name: "prepare testnet contribution",
+  })
+  await prepareContribution.focus()
+  await expect(prepareContribution).toBeFocused()
+  await page.keyboard.press("Enter")
   await expect(page.getByText(/Payment required\. Run the Moderato command/)).toBeVisible()
 
   const command = page.getByLabel("Tempo payment command")
@@ -109,6 +115,11 @@ test("signed-in user can save a wallet, create an RFS, and prepare a bound testn
   await expect(command).toContainText("https://rpc.moderato.tempo.xyz")
   await expect(command).toContainText("mppx sign")
   await expect(command).not.toContainText("MPPX_ACCOUNT=main")
+  const copyPaymentCommand = page.getByRole("button", {
+    name: "Copy payment command",
+  })
+  await copyPaymentCommand.focus()
+  await expect(copyPaymentCommand).toBeFocused()
 
   await expectNoSeriousAccessibilityIssues(page)
 

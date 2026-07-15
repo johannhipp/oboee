@@ -2,8 +2,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { fetchQuery } from "convex/nextjs"
 import { api } from "../../../convex/_generated/api"
-import { RFSRow } from "@/components/rfs-row"
-import { toRfsViewModel } from "@/lib/view-models"
+import { MarketplaceRow } from "@/components/marketplace-row"
 
 export const dynamic = "force-dynamic"
 
@@ -15,24 +14,16 @@ const isStatus = (value: string | undefined) =>
 export default async function BrowsePage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; q?: string }>
+  searchParams: Promise<{ status?: string; q?: string; cursor?: string }>
 }) {
   const params = await searchParams
   const status = isStatus(params.status) ? params.status : undefined
-  const q = params.q?.trim().toLowerCase() ?? ""
-
-  const rows = await fetchQuery(api.rfs.list, { status })
-  const filtered = rows.filter((rfs) => {
-    if (!q) {
-      return true
-    }
-    return [rfs.title, rfs.description, rfs.scope, ...rfs.tags]
-      .join(" ")
-      .toLowerCase()
-      .includes(q)
+  const marketplace = await fetchQuery(api.marketplace.list, {
+    status,
+    q: params.q,
+    cursor: params.cursor,
+    limit: 24,
   })
-
-  const visibleRfs = filtered.map(toRfsViewModel)
 
   const pills = [
     { label: "all", href: "/browse", active: !status },
@@ -82,9 +73,24 @@ export default async function BrowsePage({
         <span className="hidden md:block w-24">author</span>
       </div>
 
-      {visibleRfs.map((rfs) => (
-        <RFSRow key={rfs.id} rfs={rfs} />
+      {marketplace.items.map((item) => (
+        <MarketplaceRow key={item.itemId} item={item} />
       ))}
+      {marketplace.nextCursor ? (
+        <Link
+          href={{
+            pathname: "/browse",
+            query: {
+              ...(status ? { status } : {}),
+              ...(params.q ? { q: params.q } : {}),
+              cursor: marketplace.nextCursor,
+            },
+          }}
+          className="mt-4 inline-block font-mono text-xs underline underline-offset-2"
+        >
+          next page
+        </Link>
+      ) : null}
     </section>
   )
 }

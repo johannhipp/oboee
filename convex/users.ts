@@ -1,32 +1,14 @@
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
+import { requireAuthedUser } from "./lib/auth";
+import { rfsStatusValidator } from "./lib/validators";
+import { savePayoutWalletPreference } from "./lib/wallet";
 
-const walletAddressValidator = /^0x[a-fA-F0-9]{40}$/;
-const zeroAddress = "0x0000000000000000000000000000000000000000";
-
-export const normalizePayoutWalletAddress = (walletAddress: string) => {
-  const normalizedWalletAddress = walletAddress.trim().toLowerCase();
-
-  if (
-    !walletAddressValidator.test(normalizedWalletAddress) ||
-    normalizedWalletAddress === zeroAddress
-  ) {
-    throw new ConvexError({
-      code: "INVALID_WALLET_ADDRESS",
-      message: "Wallet address must be a nonzero 0x-prefixed 40-hex string.",
-    });
-  }
-  return normalizedWalletAddress;
-};
-
-export const sumClaimablePayoutBaseUnits = (
-  rows: ReadonlyArray<{ netAmountBaseUnits: bigint; status: string }>,
-) =>
-  rows
-    .filter((row) => row.status === "claimable")
-    .reduce((sum, row) => sum + row.netAmountBaseUnits, BigInt(0));
+export const sumUnsettledTestnetEarningsBaseUnits = (
+  rows: ReadonlyArray<{ netAmountBaseUnits: bigint }>,
+) => rows.reduce((sum, row) => sum + row.netAmountBaseUnits, BigInt(0));
 
 export const updateWallet = mutation({
   args: {
@@ -37,31 +19,12 @@ export const updateWallet = mutation({
     walletAddress: v.string(),
   }),
   handler: async (ctx, args) => {
-    const normalizedWalletAddress = normalizePayoutWalletAddress(args.walletAddress);
-    const user = await authComponent.safeGetAuthUser(ctx);
-    if (!user) {
-      throw new ConvexError({
-        code: "UNAUTHORIZED",
-        message: "Authentication required.",
-      });
-    }
-
-    const existingWallet = await ctx.db
-      .query("payoutWallets")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .unique();
-    if (existingWallet) {
-      await ctx.db.patch(existingWallet._id, {
-        walletAddress: normalizedWalletAddress,
-        updatedAt: Date.now(),
-      });
-    } else {
-      await ctx.db.insert("payoutWallets", {
-        userId: user._id,
-        walletAddress: normalizedWalletAddress,
-        updatedAt: Date.now(),
-      });
-    }
+    const user = await requireAuthedUser(ctx);
+    const normalizedWalletAddress = await savePayoutWalletPreference(
+      ctx,
+      user._id,
+      args.walletAddress,
+    );
 
     return {
       userId: user._id,
@@ -80,15 +43,16 @@ export const getDashboard = query({
     }),
     requests: v.array(
       v.object({
-        id: v.string(),
+        kind: v.literal("request"),
+        itemId: v.string(),
+        detailHref: v.string(),
         title: v.string(),
-        status: v.union(
-          v.literal("open"),
-          v.literal("funded"),
-          v.literal("published"),
-        ),
+        status: rfsStatusValidator,
         fundingThresholdBaseUnits: v.int64(),
         currentAmountBaseUnits: v.int64(),
+        authorUserId: v.string(),
+        authorLabel: v.string(),
+        createdAt: v.number(),
       }),
     ),
     contributions: v.array(
@@ -107,59 +71,46 @@ export const getDashboard = query({
         amountBaseUnits: v.int64(),
       }),
     ),
-    claimablePayoutBaseUnits: v.int64(),
+    unsettledTestnetEarningsBaseUnits: v.int64(),
   }),
   handler: async (ctx) => {
-    const user = await authComponent.safeGetAuthUser(ctx);
-    if (!user) {
-      throw new ConvexError({
-        code: "UNAUTHORIZED",
-        message: "Authentication required.",
-      });
-    }
+    const user = await requireAuthedUser(ctx);
 
     const [
       requests,
       contributions,
       purchases,
       payoutWallet,
-      fundingPayoutRows,
-      purchasePayoutRows,
+      earningRows,
     ] = await Promise.all([
       ctx.db
         .query("rfs")
         .withIndex("by_author", (q) => q.eq("authorUserId", user._id))
         .order("desc")
-        .collect(),
+        .take(50),
       ctx.db
         .query("contributions")
         .withIndex("by_backer", (q) => q.eq("backerUserId", user._id))
         .order("desc")
-        .collect(),
+        .take(50),
       ctx.db
         .query("purchases")
         .withIndex("by_buyer", (q) => q.eq("buyerUserId", user._id))
         .order("desc")
-        .collect(),
+        .take(50),
       ctx.db
         .query("payoutWallets")
         .withIndex("by_user", (q) => q.eq("userId", user._id))
         .unique(),
       ctx.db
-        .query("payoutLedger")
-        .withIndex("by_researcher", (q) => q.eq("researcherUserId", user._id))
-        .collect(),
-      ctx.db
-        .query("payoutEntries")
-        .withIndex("by_researcher_status", (q) =>
-          q.eq("researcherUserId", user._id).eq("status", "claimable"),
+        .query("earningEntries")
+        .withIndex("by_researcher_currency", (q) =>
+          q.eq("researcherUserId", user._id),
         )
-        .collect(),
+        .take(100),
     ]);
-    const claimablePayoutBaseUnits = sumClaimablePayoutBaseUnits([
-      ...fundingPayoutRows,
-      ...purchasePayoutRows,
-    ]);
+    const unsettledTestnetEarningsBaseUnits =
+      sumUnsettledTestnetEarningsBaseUnits(earningRows);
 
     const contributionRows = await Promise.all(
       contributions.map(async (contribution) => {
@@ -193,15 +144,20 @@ export const getDashboard = query({
         walletAddress: payoutWallet?.walletAddress ?? null,
       },
       requests: requests.map((rfs) => ({
-        id: rfs._id,
+        kind: "request" as const,
+        itemId: rfs._id,
+        detailHref: `/browse/${rfs._id}`,
         title: rfs.title,
         status: rfs.status,
         fundingThresholdBaseUnits: rfs.fundingThresholdBaseUnits,
         currentAmountBaseUnits: rfs.currentAmountBaseUnits,
+        authorUserId: rfs.authorUserId,
+        authorLabel: "you",
+        createdAt: rfs._creationTime,
       })),
       contributions: contributionRows,
       purchases: purchaseRows,
-      claimablePayoutBaseUnits,
+      unsettledTestnetEarningsBaseUnits,
     };
   },
 });

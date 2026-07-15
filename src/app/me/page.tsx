@@ -4,8 +4,8 @@ import { api } from "../../../convex/_generated/api"
 import { fetchAuthQuery, isAuthenticated } from "@/lib/auth-server"
 import { CopyText } from "@/components/copy-text"
 import { AsciiBox } from "@/components/ascii-box"
-import { RFSRow } from "@/components/rfs-row"
-import { baseUnitsToNumber, formatTokenAmount } from "@/lib/view-models"
+import { MarketplaceRow } from "@/components/marketplace-row"
+import { MoneyText } from "@/components/money-text"
 import { PayoutWalletForm } from "@/components/payout-wallet-form"
 
 export const dynamic = "force-dynamic"
@@ -41,9 +41,12 @@ export default async function ProfilePage() {
         )}
       </div>
 
-      <AsciiBox title="testnet creator balance">
+      <AsciiBox title="unsettled testnet earnings">
         <p className="font-mono text-lg">
-          ${formatTokenAmount(baseUnitsToNumber(dashboard.claimablePayoutBaseUnits))} pathUSD
+          <MoneyText
+            baseUnits={dashboard.unsettledTestnetEarningsBaseUnits}
+            currency="pathUSD"
+          />
         </p>
         <p className="text-xs font-mono text-muted-foreground mt-1 mb-4">
           Accounting only; this MVP does not claim an on-chain payout has occurred.
@@ -54,23 +57,8 @@ export default async function ProfilePage() {
       <div className="mt-6">
         <AsciiBox title="my requests">
           {dashboard.requests.length > 0 ? (
-            dashboard.requests.map((rfs) => (
-              <RFSRow
-                key={rfs.id}
-                rfs={{
-                  id: rfs.id,
-                  title: rfs.title,
-                  description: "",
-                  scope: "",
-                  fundingThreshold: baseUnitsToNumber(rfs.fundingThresholdBaseUnits),
-                  currentAmount: baseUnitsToNumber(rfs.currentAmountBaseUnits),
-                  status: rfs.status,
-                  authorId: dashboard.user.id,
-                  claimantId: null,
-                  createdAt: new Date().toISOString(),
-                  authorLabel: "you",
-                }}
-              />
+            dashboard.requests.map((item) => (
+              <MarketplaceRow key={item.itemId} item={item} />
             ))
           ) : (
             <p className="text-sm text-muted-foreground font-mono italic">
@@ -91,7 +79,7 @@ export default async function ProfilePage() {
                 >
                   <span className="truncate min-w-0">{contrib.rfsTitle}</span>
                   <span className="text-muted-foreground ml-4 shrink-0">
-                    ${formatTokenAmount(baseUnitsToNumber(contrib.amountBaseUnits))}
+                    <MoneyText baseUnits={contrib.amountBaseUnits} />
                   </span>
                 </div>
               )
@@ -115,7 +103,7 @@ export default async function ProfilePage() {
                 >
                   <span className="truncate min-w-0">{purchase.skillTitle}</span>
                   <span className="text-muted-foreground ml-4 shrink-0">
-                    ${formatTokenAmount(baseUnitsToNumber(purchase.amountBaseUnits))}
+                    <MoneyText baseUnits={purchase.amountBaseUnits} />
                   </span>
                 </div>
               )

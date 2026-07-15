@@ -3,8 +3,9 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { AsciiBox } from "@/components/ascii-box"
-import { RFSRow } from "@/components/rfs-row"
-import { numberToBaseUnitsString } from "@/lib/view-models"
+import { MarketplaceRow } from "@/components/marketplace-row"
+import { createMarketplaceRequestPreview } from "@/lib/marketplace"
+import { parseTokenAmount } from "../../shared/domain/money"
 
 const inputStyle =
   "bg-gray-50 border border-gray-200 rounded-md px-3 py-2 font-mono text-sm w-full placeholder:text-gray-400 outline-none focus:border-gray-400"
@@ -24,12 +25,13 @@ export function NewRfsForm() {
     setError(null)
     setIsSubmitting(true)
 
-    const fundingThresholdBaseUnits = numberToBaseUnitsString(Number(fundingGoal))
-    if (!fundingThresholdBaseUnits) {
+    const parsedFundingThreshold = parseTokenAmount(fundingGoal)
+    if (!parsedFundingThreshold || parsedFundingThreshold <= BigInt(0)) {
       setError("Funding goal must be a positive number.")
       setIsSubmitting(false)
       return
     }
+    const fundingThresholdBaseUnits = parsedFundingThreshold.toString()
 
     try {
       const response = await fetch("/api/rfs", {
@@ -176,20 +178,11 @@ export function NewRfsForm() {
           preview
         </h2>
         <AsciiBox title="preview">
-          <RFSRow
-            rfs={{
-              id: "preview",
-              title: title || "new request",
-              description,
-              scope,
-              fundingThreshold: Number(fundingGoal) || 0,
-              currentAmount: 0,
-              status: "open",
-              authorId: "you",
-              claimantId: null,
-              createdAt: new Date().toISOString(),
-              authorLabel: "you",
-            }}
+          <MarketplaceRow
+            item={createMarketplaceRequestPreview({
+              title,
+              fundingThresholdBaseUnits: parseTokenAmount(fundingGoal) ?? BigInt(0),
+            })}
           />
         </AsciiBox>
       </div>

@@ -1,5 +1,4 @@
 import { ConvexError } from "convex/values";
-import { assertServerSecret } from "./secretBoundary";
 
 type PaymentEventFacts = {
   type: "fund" | "buy";
@@ -42,18 +41,15 @@ export const paymentIdempotencyConflict = (): never => {
   throw idempotencyConflict();
 };
 
-export const assertPaymentServerSecret = (providedSecret: string) =>
-  assertServerSecret(
-    providedSecret,
-    "OBOE_PAYMENT_RECORDING_SECRET",
-    "Payment recording is not configured.",
-  );
+export type PaymentPrincipal =
+  | { kind: "user"; userId: string }
+  | { kind: "anonymous"; paymentReference: string };
 
-export const resolvePaymentPrincipal = (
+export const resolveVerifiedPaymentPrincipal = (
   authenticatedUserId: string | undefined,
   principalUserId: string | undefined,
   challengeId: string,
-) => {
+): PaymentPrincipal => {
   const normalizedPrincipal = principalUserId?.trim();
   if (normalizedPrincipal && normalizedPrincipal.length > 256) {
     throw new ConvexError({
@@ -71,5 +67,8 @@ export const resolvePaymentPrincipal = (
       message: "Payment principal does not match the authenticated user.",
     });
   }
-  return authenticatedUserId ?? normalizedPrincipal ?? `agent:${challengeId.slice(0, 18)}`;
+  const userId = authenticatedUserId ?? normalizedPrincipal;
+  return userId
+    ? { kind: "user", userId }
+    : { kind: "anonymous", paymentReference: challengeId };
 };

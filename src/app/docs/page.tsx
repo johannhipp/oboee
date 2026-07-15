@@ -1,74 +1,12 @@
 import type { Metadata } from "next"
 import { AsciiBox } from "@/components/ascii-box"
 import { CopyBox } from "@/components/copy-box"
+import {
+  API_REQUEST_EXAMPLES,
+  DOCUMENTED_API_ROUTES,
+} from "@/lib/api/docs"
 
 export const metadata: Metadata = { title: "Docs | Oboe" }
-
-const routes = [
-  {
-    method: "GET",
-    path: "/api/skills",
-    auth: false,
-    mpp: false,
-    description: "list all skills and RFSs. filter with ?status=open|funded|published, ?q=search, ?tags=tag1,tag2",
-  },
-  {
-    method: "GET",
-    path: "/api/skills/[id]",
-    auth: false,
-    mpp: false,
-    description: "get public metadata for one skill plus its RFS and caller-specific action flags",
-  },
-  {
-    method: "GET",
-    path: "/api/skills/[id]/content",
-    auth: false,
-    mpp: true,
-    description: "get full Markdown with account entitlement, or buy one copy for the exact listed testnet price",
-  },
-  {
-    method: "POST",
-    path: "/api/rfs",
-    auth: true,
-    mpp: false,
-    description: "create a new RFS. body: { title, description, scope, tags[], fundingThresholdBaseUnits, minimumContributionBaseUnits }",
-  },
-  {
-    method: "GET",
-    path: "/api/rfs/[id]",
-    auth: false,
-    mpp: false,
-    description: "get public RFS status and funding progress",
-  },
-  {
-    method: "POST",
-    path: "/api/rfs/[id]/fund",
-    auth: false,
-    mpp: true,
-    description: "fund an open RFS. MPP payment for the contribution amount. auto-transitions to funded when threshold met",
-  },
-  {
-    method: "POST",
-    path: "/api/rfs/[id]/claim",
-    auth: true,
-    mpp: false,
-    description: "claim a funded RFS. you commit to writing the skill",
-  },
-  {
-    method: "POST",
-    path: "/api/rfs/[id]/submit",
-    auth: true,
-    mpp: false,
-    description: "submit skill for a claimed RFS. body: { contentMarkdown, summary, tags[], purchasePriceBaseUnits }. auto-publishes",
-  },
-  {
-    method: "POST",
-    path: "/api/me/wallet",
-    auth: true,
-    mpp: false,
-    description: "set your wallet address. body: { walletAddress }",
-  },
-]
 
 export default function DocsPage() {
   return (
@@ -92,7 +30,14 @@ export default function DocsPage() {
 
         <AsciiBox title="endpoints">
           <div className="space-y-4">
-            {routes.map((route) => (
+            {DOCUMENTED_API_ROUTES.map((route) => {
+              const example =
+                route.operationId in API_REQUEST_EXAMPLES
+                  ? API_REQUEST_EXAMPLES[
+                      route.operationId as keyof typeof API_REQUEST_EXAMPLES
+                    ]
+                  : undefined
+              return (
               <div key={`${route.method}-${route.path}`} className="font-mono">
                 <div className="flex items-center gap-2 text-sm">
                   <span className={`font-semibold shrink-0 ${route.method === "GET" ? "text-emerald-700" : "text-blue-700"}`}>
@@ -100,12 +45,12 @@ export default function DocsPage() {
                   </span>
                   <span className="text-foreground">{route.path}</span>
                   <span className="flex gap-1.5 ml-auto shrink-0">
-                    {route.auth && (
+                    {route.auth !== "public" && (
                       <span className="text-[10px] font-semibold uppercase leading-none px-1.5 py-0.5 rounded-full ring-1 ring-amber-300 text-amber-700 bg-amber-50">
-                        auth
+                        {route.auth === "required" ? "auth" : "auth-aware"}
                       </span>
                     )}
-                    {route.mpp && (
+                    {route.payment === "mpp" && (
                       <span className="text-[10px] font-semibold uppercase leading-none px-1.5 py-0.5 rounded-full ring-1 ring-purple-300 text-purple-700 bg-purple-50">
                         mpp
                       </span>
@@ -115,8 +60,14 @@ export default function DocsPage() {
                 <p className="text-xs text-muted-foreground mt-0.5 break-words">
                   {route.description}
                 </p>
+                {example ? (
+                  <pre className="mt-1 overflow-x-auto rounded bg-gray-50 p-2 text-[10px]">
+                    {JSON.stringify(example.body, null, 2)}
+                  </pre>
+                ) : null}
               </div>
-            ))}
+              )
+            })}
           </div>
         </AsciiBox>
 

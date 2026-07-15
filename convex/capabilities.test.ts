@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canSubmitRfs } from "./lib/capabilities";
+import { canSubmitRfs } from "./lib/rfsDomain";
 
 describe("RFS capabilities", () => {
   it("only lets the assigned claimant submit a funded request", () => {

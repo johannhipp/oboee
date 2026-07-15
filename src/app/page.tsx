@@ -1,21 +1,20 @@
 import { OBOE_ASCII } from "@/lib/constants"
 import { fetchQuery } from "convex/nextjs"
 import { api } from "../../convex/_generated/api"
-import { RFSRow } from "@/components/rfs-row"
+import { MarketplaceRow } from "@/components/marketplace-row"
 import { AsciiBox } from "@/components/ascii-box"
 import { CopyBox } from "@/components/copy-box"
-import { toRfsViewModel } from "@/lib/view-models"
 
 export const dynamic = "force-dynamic"
 
 export default async function Home() {
-  const [openRows, publishedRows] = await Promise.all([
-    fetchQuery(api.rfs.list, { status: "open" }),
-    fetchQuery(api.rfs.list, { status: "published" }),
-  ])
-
-  const openRequests = openRows.map(toRfsViewModel)
-  const recentlyPublished = publishedRows.map(toRfsViewModel).slice(0, 4)
+  const marketplace = await fetchQuery(api.marketplace.list, { limit: 50 })
+  const openRequests = marketplace.items
+    .filter((item) => item.kind === "request" && item.status === "open")
+    .slice(0, 4)
+  const recentlyPublished = marketplace.items
+    .filter((item) => item.kind === "skill")
+    .slice(0, 4)
 
   return (
     <div className="my-8 max-w-2xl min-w-0 mx-auto">
@@ -42,8 +41,8 @@ export default async function Home() {
           open requests
         </h2>
         <AsciiBox title="open">
-          {openRequests.map((rfs) => (
-            <RFSRow key={rfs.id} rfs={rfs} />
+          {openRequests.map((item) => (
+            <MarketplaceRow key={item.itemId} item={item} />
           ))}
         </AsciiBox>
       </div>
@@ -53,8 +52,8 @@ export default async function Home() {
           recently published
         </h2>
         <AsciiBox title="published">
-          {recentlyPublished.map((rfs) => (
-            <RFSRow key={rfs.id} rfs={rfs} />
+          {recentlyPublished.map((item) => (
+            <MarketplaceRow key={item.itemId} item={item} />
           ))}
         </AsciiBox>
       </div>

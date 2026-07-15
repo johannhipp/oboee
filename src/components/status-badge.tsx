@@ -1,13 +1,13 @@
-import type { RFSStatus } from "@/lib/types"
+import type { RfsStatus } from "../../shared/domain/status"
 
-const statusStyles: Record<RFSStatus, string> = {
+const statusStyles: Record<RfsStatus, string> = {
   open: "text-gray-600 ring-1 ring-gray-300",
   funded: "text-emerald-700 ring-1 ring-emerald-300 bg-emerald-50",
   published: "text-gray-900 ring-1 ring-gray-400 bg-gray-100",
 }
 
 interface StatusBadgeProps {
-  status: RFSStatus
+  status: RfsStatus
 }
 
 export function StatusBadge({ status }: StatusBadgeProps) {

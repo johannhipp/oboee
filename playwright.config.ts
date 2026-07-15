@@ -22,8 +22,13 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run dev -- --hostname 127.0.0.1 --port 3100",
+    env: {
+      OBOE_SERVER_COMMAND_SECRET:
+        process.env.OBOE_SERVER_COMMAND_SECRET ??
+        "oboe-e2e-server-command-secret-0001",
+    },
     url: baseURL,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 })

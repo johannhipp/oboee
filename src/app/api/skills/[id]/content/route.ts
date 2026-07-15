@@ -1,22 +1,18 @@
 import { fetchMutation, fetchQuery } from "convex/nextjs";
 
 import { api } from "../../../../../../convex/_generated/api";
-import { errorResponse, errorResponseFrom } from "@/app/api/_lib/responses";
-import { readVerifiedPayment } from "@/app/api/_lib/payment";
+import { ok, problem, responseFromError } from "@/lib/api/http";
+import { readVerifiedPayment } from "@/lib/api/payment";
 import { getToken } from "@/lib/auth-server";
-import { getMppx, getPaymentRecordingSecret } from "@/lib/mpp";
+import { getMppx } from "@/lib/mpp";
+import { createSignedPaymentServerCommand } from "@/lib/server-command";
 import { isMvpPaymentBaseUnits } from "@/lib/tempo";
+import { formatTokenBaseUnits } from "../../../../../../shared/domain/money";
 
-const MPP_DECIMALS = 6;
-
-const formatBaseUnits = (value: bigint) => {
-  const scale = BigInt(10) ** BigInt(MPP_DECIMALS);
-  const whole = value / scale;
-  const fraction = (value % scale).toString().padStart(MPP_DECIMALS, "0").replace(/0+$/, "");
-  return fraction.length > 0 ? `${whole.toString()}.${fraction}` : whole.toString();
-};
-
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(
+  request: Request,
+  context: RouteContext<"/api/skills/[id]/content">,
+) {
   try {
     const { id } = await context.params;
     const token = await getToken();
@@ -27,7 +23,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const access = await fetchQuery(api.purchases.checkAccess, { skillId: id }, convexOptions);
 
     if (!access.skill) {
-      return errorResponse("NOT_FOUND", "Skill not found.", 404);
+      return problem("NOT_FOUND", "Skill not found.", 404);
     }
 
     if (access.hasAccess) {
@@ -37,10 +33,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         convexOptions,
       );
       if (!entitled) {
-        return errorResponse("FORBIDDEN", "Skill access could not be verified.", 403);
+        return problem("FORBIDDEN", "Skill access could not be verified.", 403);
       }
-      return Response.json({
-        status: "ok",
+      return ok({
         resourceType: "skill",
         resourceId: access.skill._id,
         nextState: access.skill.status,
@@ -50,25 +45,29 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     }
 
     if (access.skill.status !== "published") {
-      return errorResponse("INVALID_STATE", "Skill is not available for purchase.", 409);
+      return problem("INVALID_STATE", "Skill is not available for purchase.", 409);
     }
 
     if (!isMvpPaymentBaseUnits(access.skill.purchasePriceBaseUnits)) {
-      return errorResponse(
+      return problem(
         "INVALID_STATE",
         "This listing is outside the MVP testnet purchase range.",
         409,
       );
     }
-    const chargeAmount = formatBaseUnits(access.skill.purchasePriceBaseUnits);
+    const chargeAmount = formatTokenBaseUnits(
+      access.skill.purchasePriceBaseUnits,
+      { minimumFractionDigits: 0 },
+    );
     const paidHandler = getMppx().charge({
       amount: chargeAmount,
       description: `Purchase skill ${id}`,
       ...(viewer ? { externalId: viewer.userId } : {}),
     })(async (paidRequest: Request) => {
       const payment = readVerifiedPayment(paidRequest);
-      const purchase = await fetchMutation(api.purchases.recordPurchase, {
-        skillId: id,
+      const envelope = await createSignedPaymentServerCommand({
+        operation: "purchase",
+        resourceId: id,
         amountBaseUnits: payment.amountBaseUnits,
         currencyAddress: payment.currencyAddress,
         challengeId: payment.challengeId,
@@ -76,11 +75,17 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         ...(payment.principalUserId
           ? { principalUserId: payment.principalUserId }
           : {}),
-        serverSecret: getPaymentRecordingSecret(),
-      }, convexOptions);
+      });
+      const purchase = await fetchMutation(
+        api.paymentIngress.record,
+        envelope,
+        convexOptions,
+      );
+      if (purchase.operation !== "purchase") {
+        throw new Error("Payment ingress returned the wrong operation.");
+      }
 
-      return Response.json({
-        status: "ok",
+      return ok({
         resourceType: "skill",
         resourceId: access.skill._id,
         nextState: access.skill.status,
@@ -93,6 +98,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
     return paidHandler(request);
   } catch (error) {
-    return errorResponseFrom(error);
+    return responseFromError(error);
   }
 }

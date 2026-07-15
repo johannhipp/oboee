@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 
 import type { Doc } from "../_generated/dataModel";
+import { skillStatusValidator } from "./validators";
 
 export const skillMetadataValidator = v.object({
   _id: v.id("skills"),
@@ -10,7 +11,7 @@ export const skillMetadataValidator = v.object({
   summary: v.string(),
   tags: v.array(v.string()),
   purchasePriceBaseUnits: v.int64(),
-  status: v.literal("published"),
+  status: skillStatusValidator,
 });
 
 export const toSkillMetadata = (skill: Doc<"skills">) => ({
