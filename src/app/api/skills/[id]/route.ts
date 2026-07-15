@@ -1,5 +1,28 @@
-import { retiredApiResponse } from "@/lib/api-v2/legacy-routes";
+import { fetchQuery } from "convex/nextjs";
+
+import { api } from "../../../../../convex/_generated/api";
+import type { Id } from "../../../../../convex/_generated/dataModel";
+import { fetchAuthQuery, isAuthenticated } from "@/lib/auth-server";
+import { errorResponseFrom } from "../../_lib/responses";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  return retiredApiResponse({ replacementMethod: "GET", replacementPath: `/api/v2/skills/${(await context.params).id}`, message: "The unversioned skill representation is retired. Use the policy-v2 skill resource and capabilities." });
+  try {
+    const { id } = await context.params;
+    const authed = await isAuthenticated();
+    const getDetail = authed ? fetchAuthQuery : fetchQuery;
+
+    try {
+      const detail = await getDetail(api.skills.get, {
+        skillId: id as Id<"skills">,
+      });
+      return Response.json(detail);
+    } catch {
+      const fallbackDetail = await getDetail(api.skills.get, {
+        rfsId: id as Id<"rfs">,
+      });
+      return Response.json(fallbackDetail);
+    }
+  } catch (error) {
+    return errorResponseFrom(error);
+  }
 }

@@ -1,22 +1,15 @@
 import { createClient, type GenericCtx } from "@convex-dev/better-auth";
 import { convex } from "@convex-dev/better-auth/plugins";
-import { apiKey } from "@better-auth/api-key";
 import { passkey } from "@better-auth/passkey";
-import { betterAuth, type BetterAuthOptions } from "better-auth/minimal";
+import { betterAuth } from "better-auth/minimal";
 
 import authConfig from "./auth.config";
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
-import authSchema from "./betterAuth/schema";
 
-export const API_KEY_DEFAULT_EXPIRES_IN_SECONDS = 90 * 24 * 60 * 60;
-export const API_KEY_METADATA_ENABLED = true;
+export const authComponent = createClient<DataModel>(components.betterAuth);
 
-export const authComponent = createClient<DataModel, typeof authSchema>(components.betterAuth, {
-  local: { schema: authSchema },
-});
-
-export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
+export const createAuth = (ctx: GenericCtx<DataModel>) => {
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
   const trustedOrigins = [
     siteUrl,
@@ -24,7 +17,7 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
     "http://127.0.0.1:3000",
   ].filter((value): value is string => Boolean(value));
 
-  return {
+  const options = {
     database: authComponent.adapter(ctx),
     ...(siteUrl ? { baseURL: siteUrl } : {}),
     trustedOrigins,
@@ -34,33 +27,11 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
     },
     plugins: [
       passkey(),
-      apiKey({
-        enableSessionForAPIKeys: true,
-        enableMetadata: API_KEY_METADATA_ENABLED,
-        keyExpiration: {
-          defaultExpiresIn: API_KEY_DEFAULT_EXPIRES_IN_SECONDS,
-          minExpiresIn: 1,
-          maxExpiresIn: 365,
-        },
-        rateLimit: {
-          enabled: true,
-          timeWindow: 60 * 1_000,
-          maxRequests: 120,
-        },
-        permissions: {
-          defaultPermissions: {
-            rfs: ["read"],
-            skills: ["read"],
-            settlement: ["read"],
-          },
-        },
-      }),
       convex({
         authConfig,
-        jwt: { expirationSeconds: 60 },
       }),
     ],
-  } satisfies BetterAuthOptions;
-};
+  };
 
-export const createAuth = (ctx: GenericCtx<DataModel>) => betterAuth(createAuthOptions(ctx));
+  return betterAuth(options);
+};

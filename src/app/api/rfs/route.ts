@@ -1,9 +1,79 @@
-import { retiredApiResponse } from "@/lib/api-v2/legacy-routes";
+import { api } from "../../../../convex/_generated/api";
+import { fetchAuthMutation, isAuthenticated } from "@/lib/auth-server";
 
-export async function GET() {
-  return retiredApiResponse({ replacementMethod: "GET", replacementPath: "/api/v2/rfs", message: "The unversioned RFS list is retired. Use the policy-v2 RFS projection." });
-}
+import { errorResponse, errorResponseFrom, okWriteResponse } from "../_lib/responses";
 
-export async function POST() {
-  return retiredApiResponse({ replacementMethod: "POST", replacementPath: "/api/v2/rfs", message: "Policy-v1 RFS creation is retired. Create a criteria-bound policy-v2 RFS." });
+const parseBaseUnits = (value: unknown): bigint | null => {
+  if (typeof value === "bigint") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return BigInt(value);
+  }
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    return BigInt(value.trim());
+  }
+  return null;
+};
+
+export async function POST(request: Request) {
+  if (!(await isAuthenticated())) {
+    return errorResponse("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const body = (await request.json()) as {
+      title?: unknown;
+      description?: unknown;
+      scope?: unknown;
+      tags?: unknown;
+      fundingThresholdBaseUnits?: unknown;
+      minimumContributionBaseUnits?: unknown;
+      fundingTokenAddress?: unknown;
+    };
+
+    if (
+      typeof body.title !== "string" ||
+      typeof body.description !== "string" ||
+      typeof body.scope !== "string" ||
+      !Array.isArray(body.tags) ||
+      !body.tags.every((tag) => typeof tag === "string")
+    ) {
+      return errorResponse("INVALID_ARGUMENT", "Invalid create RFS payload.", 400);
+    }
+
+    const fundingTokenAddress =
+      typeof body.fundingTokenAddress === "string" && body.fundingTokenAddress.trim().length > 0
+        ? body.fundingTokenAddress
+        : process.env.MPP_FUNDING_TOKEN_ADDRESS;
+
+    if (!fundingTokenAddress) {
+      return errorResponse(
+        "INVALID_ARGUMENT",
+        "fundingTokenAddress is required when MPP_FUNDING_TOKEN_ADDRESS is unset.",
+        400,
+      );
+    }
+
+    const fundingThresholdBaseUnits = parseBaseUnits(body.fundingThresholdBaseUnits);
+    const minimumContributionBaseUnits = parseBaseUnits(body.minimumContributionBaseUnits);
+
+    if (fundingThresholdBaseUnits === null || minimumContributionBaseUnits === null) {
+      return errorResponse("INVALID_ARGUMENT", "Base unit values must be integer strings.", 400);
+    }
+
+    const result = await fetchAuthMutation(api.rfs.create, {
+      title: body.title,
+      description: body.description,
+      scope: body.scope,
+      tags: body.tags,
+      fundingThresholdBaseUnits,
+      minimumContributionBaseUnits,
+      fundingTokenAddress,
+    });
+
+    return okWriteResponse("rfs", result.rfsId, result.nextState);
+  } catch (error) {
+    return errorResponseFrom(error);
+  }
 }

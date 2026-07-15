@@ -2,7 +2,8 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { authComponent, createAuth } from "./auth";
-import { walletAddressValidator } from "./lib/helpers";
+
+const walletAddressValidator = /^0x[a-fA-F0-9]{40}$/;
 
 export const updateWallet = mutation({
   args: {
@@ -63,16 +64,9 @@ export const getDashboard = query({
         status: v.union(
           v.literal("open"),
           v.literal("funded"),
-          v.literal("assigned"),
-          v.literal("submitted"),
-          v.literal("evaluation_open"),
-          v.literal("accepted"),
-          v.literal("revision_requested"),
-          v.literal("disputed"),
-          v.literal("rejected"),
+          v.literal("fulfilled"),
           v.literal("published"),
           v.literal("cancelled"),
-          v.literal("fulfilled"),
         ),
         fundingThresholdBaseUnits: v.int64(),
         currentAmountBaseUnits: v.int64(),

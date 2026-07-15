@@ -1,5 +1,25 @@
-import { retiredApiResponse } from "@/lib/api-v2/legacy-routes";
+import { api } from "../../../../../convex/_generated/api";
+import { fetchAuthMutation, isAuthenticated } from "@/lib/auth-server";
 
-export async function POST() {
-  return retiredApiResponse({ replacementMethod: "POST", replacementPath: "/api/v2/me/wallet-challenges", message: "Direct wallet linking is retired. Create and prove a v2 wallet challenge." });
+import { errorResponse, errorResponseFrom, okWriteResponse } from "../../_lib/responses";
+
+export async function POST(request: Request) {
+  if (!(await isAuthenticated())) {
+    return errorResponse("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const body = (await request.json()) as { walletAddress?: unknown };
+    if (typeof body.walletAddress !== "string") {
+      return errorResponse("INVALID_WALLET_ADDRESS", "walletAddress must be a string.", 400);
+    }
+
+    const result = await fetchAuthMutation(api.users.updateWallet, {
+      walletAddress: body.walletAddress,
+    });
+
+    return okWriteResponse("user", result.userId, "wallet_linked");
+  } catch (error) {
+    return errorResponseFrom(error);
+  }
 }

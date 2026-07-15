@@ -1,14 +1,21 @@
 import { Mppx, tempo } from "mppx/nextjs";
-import { createClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { tempo as tempoChain } from "viem/chains";
+
+// =============================================================================
+// MIGRATION: Testnet -> Mainnet
+// When switching to production with tempo wallet, change these values:
+//
+// 1. RECIPIENT_ADDRESS -> your mainnet wallet address (from `tempo wallet -t whoami`)
+// 2. CURRENCY_ADDRESS  -> mainnet USDC: "0x..." (check https://docs.tempo.xyz/quickstart/tokenlist)
+// 3. RPC_URL           -> "https://rpc.tempo.xyz" (or remove to use default)
+//
+// Everything else stays the same. No code changes needed.
+// =============================================================================
 
 const RECIPIENT_ADDRESS = process.env.MPP_RECIPIENT_ESCROW_ADDRESS;
 const CURRENCY_ADDRESS = process.env.MPP_FUNDING_TOKEN_ADDRESS;
 const FEE_PAYER_PRIVATE_KEY = process.env.MPP_FEE_PAYER_PRIVATE_KEY;
 const ENABLE_FEE_PAYER = process.env.MPP_ENABLE_FEE_PAYER === "true";
-const SECRET_KEY = process.env.MPP_SECRET_KEY;
-const RPC_URL = process.env.OBOE_MPP_RPC_URL?.trim();
 const hexAddressPattern = /^0x[a-fA-F0-9]{40}$/;
 const hexPrivateKeyPattern = /^0x[a-fA-F0-9]{64}$/;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -26,58 +33,39 @@ const asHexAddress = (value: string | undefined): `0x${string}` | null => {
   return normalized as `0x${string}`;
 };
 
-interface ChargeOptions {
-  amount: string;
-  description?: string;
-  expires?: string;
-  externalId?: string;
-  meta?: Record<string, string>;
-}
-
-type RouteHandler = (request: Request) => Response | Promise<Response>;
-
-interface PaymentClient {
-  charge: (options: ChargeOptions) => (handler: RouteHandler) => RouteHandler;
-}
-
+const recipientAddress = asHexAddress(RECIPIENT_ADDRESS) ?? ZERO_ADDRESS;
+const currencyAddress = asHexAddress(CURRENCY_ADDRESS) ?? ZERO_ADDRESS;
 const createMppx = () => {
-  const recipientAddress = asHexAddress(RECIPIENT_ADDRESS);
-  const currencyAddress = asHexAddress(CURRENCY_ADDRESS);
-  if (!recipientAddress || recipientAddress.toLowerCase() === ZERO_ADDRESS) {
-    throw new Error("MPP_RECIPIENT_ESCROW_ADDRESS must be a nonzero EVM address.");
-  }
-  if (!currencyAddress || currencyAddress.toLowerCase() === ZERO_ADDRESS) {
-    throw new Error("MPP_FUNDING_TOKEN_ADDRESS must be a nonzero EVM address.");
-  }
-  if (!SECRET_KEY || SECRET_KEY.length < 32) {
-    throw new Error("MPP_SECRET_KEY must contain at least 32 characters.");
-  }
   const feePayerAccount =
     ENABLE_FEE_PAYER &&
     typeof FEE_PAYER_PRIVATE_KEY === "string" &&
     hexPrivateKeyPattern.test(FEE_PAYER_PRIVATE_KEY)
       ? privateKeyToAccount(FEE_PAYER_PRIVATE_KEY as `0x${string}`)
       : undefined;
-  const verificationClient = RPC_URL
-    ? createClient({ chain: tempoChain, transport: http(RPC_URL) })
-    : undefined;
 
   return Mppx.create({
-    secretKey: SECRET_KEY,
     methods: [
-      tempo.charge({
+      tempo({
         currency: currencyAddress,
         recipient: recipientAddress,
-        ...(verificationClient ? { getClient: () => verificationClient } : {}),
         ...(feePayerAccount ? { feePayer: feePayerAccount } : {}),
+        // MIGRATION: uncomment for mainnet fee sponsorship
+        // feePayer: privateKeyToAccount('0x...'),
       }),
     ],
   });
 };
 
-let mppxInstance: PaymentClient | null = null;
+let mppxInstance: ReturnType<typeof createMppx> | null = null;
 
 export const getMppx = () => {
   mppxInstance ??= createMppx();
   return mppxInstance;
 };
+
+type ChargeOptions = Parameters<ReturnType<typeof createMppx>["charge"]>[0];
+type RouteHandler = (request: Request) => Response | Promise<Response>;
+
+export const createChargeHandler =
+  (options: ChargeOptions) => (handler: RouteHandler) =>
+    getMppx().charge(options)(handler);

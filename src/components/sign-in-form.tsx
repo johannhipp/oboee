@@ -8,13 +8,13 @@ import { authClient } from "@/lib/auth-client"
 type FormMode = "sign-in" | "create-account"
 
 const inputStyle =
-  "w-full border-0 border-b border-border bg-transparent px-0 py-2 font-mono text-sm placeholder:text-gray-400 outline-none focus:border-foreground"
+  "bg-gray-50 border border-gray-200 rounded-md px-3 py-2 font-mono text-sm w-full placeholder:text-gray-400 outline-none focus:border-gray-400"
 
 const primaryButtonStyle =
-  "border-b border-foreground pb-1 font-mono text-sm disabled:opacity-60"
+  "bg-gray-900 text-white font-mono text-sm px-6 py-2 rounded-md disabled:opacity-60"
 
 const secondaryButtonStyle =
-  "border-b border-border pb-1 font-mono text-sm disabled:opacity-60"
+  "border border-gray-300 text-gray-700 font-mono text-sm px-6 py-2 rounded-md disabled:opacity-60"
 
 const resolveNextPath = (nextPath: string | null) => {
   if (!nextPath || !nextPath.startsWith("/")) {

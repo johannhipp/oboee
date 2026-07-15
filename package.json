@@ -6,43 +6,28 @@
     "dev": "next dev",
     "build": "next build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:e2e": "node scripts/run-e2e.mjs",
-    "test:e2e:playwright": "playwright test",
-    "seed:fixtures": "node scripts/seed-dev.mjs",
-    "dev:fixtures": "node scripts/seed-dev.mjs --keep-alive",
-    "test:e2e:seeded": "node scripts/run-seeded-e2e.mjs",
-    "test:e2e:update": "playwright test --update-snapshots",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
-    "@better-auth/api-key": "^1.6.23",
     "@better-auth/passkey": "^1.6.23",
     "@convex-dev/better-auth": "^0.12.5",
-    "@noble/curves": "^1.9.1",
-    "@noble/hashes": "^1.8.0",
     "better-auth": "1.6.23",
     "convex": "^1.42.1",
     "mppx": "^0.4.12",
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "viem": "^2.54.6",
-    "zod": "^4.4.3"
+    "viem": "^2.54.6"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.12.1",
-    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.3.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "convex-test": "^0.0.54",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4.3.2",
-    "typescript": "^5",
-    "vitest": "^4.1.10"
+    "typescript": "^5"
   }
 }

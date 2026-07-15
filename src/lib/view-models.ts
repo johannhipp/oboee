@@ -1,5 +1,5 @@
 import type { Id } from "../../convex/_generated/dataModel"
-import type { RFS, RFSStatus } from "./types"
+import type { RFS } from "./types"
 
 const BASE_UNITS_SCALE = 1_000_000
 
@@ -20,7 +20,7 @@ type RfsDoc = {
   scope: string
   fundingThresholdBaseUnits: bigint
   currentAmountBaseUnits: bigint
-  status: RFSStatus
+  status: "open" | "funded" | "fulfilled" | "published" | "cancelled"
   authorUserId: string
   claimantUserId?: string
 }
@@ -32,7 +32,7 @@ export const toRfsViewModel = (rfs: RfsDoc): RFS => ({
   scope: rfs.scope,
   fundingThreshold: baseUnitsToNumber(rfs.fundingThresholdBaseUnits),
   currentAmount: baseUnitsToNumber(rfs.currentAmountBaseUnits),
-  status: rfs.status,
+  status: rfs.status === "cancelled" ? "fulfilled" : rfs.status,
   authorId: rfs.authorUserId,
   claimantId: rfs.claimantUserId ?? null,
   createdAt: new Date(rfs._creationTime).toISOString(),

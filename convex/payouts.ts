@@ -2,8 +2,6 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation, type MutationCtx } from "./_generated/server";
 import { authComponent } from "./auth";
-import { walletAddressValidator } from "./lib/helpers";
-import { retirePolicyV1 } from "./lib/legacy";
 
 const requireAuthedUser = async (ctx: MutationCtx) => {
   const user = await authComponent.safeGetAuthUser(ctx);
@@ -16,7 +14,6 @@ const requireAuthedUser = async (ctx: MutationCtx) => {
   return user;
 };
 
-/** @deprecated Client payout claims are removed. Use GET /api/v2/me/obligations. */
 export const claimPayout = mutation({
   args: {
     rfsId: v.id("rfs"),
@@ -25,18 +22,9 @@ export const claimPayout = mutation({
   returns: v.object({
     rfsId: v.id("rfs"),
     claimedAmountBaseUnits: v.int64(),
-    finalPayoutBaseUnits: v.int64(),
-    qualityMultiplierBps: v.number(),
-    assessmentStatus: v.union(
-      v.literal("claimable"),
-      v.literal("reduced"),
-      v.literal("manually_resolved"),
-      v.literal("claimed"),
-    ),
     status: v.literal("claimed"),
   }),
   handler: async (ctx, args) => {
-    retirePolicyV1("GET /api/v2/me/obligations");
     const user = await requireAuthedUser(ctx);
     const callerUserId = user._id;
     const walletAddress =
@@ -51,13 +39,13 @@ export const claimPayout = mutation({
     if (rfs.claimantUserId !== callerUserId) {
       throw new ConvexError({
         code: "FORBIDDEN",
-        message: "Only the assigned author can claim payout for this RFS.",
+        message: "Only the claimant can claim payout for this RFS.",
       });
     }
     if (rfs.status !== "published") {
       throw new ConvexError({
         code: "INVALID_STATE",
-        message: "Payout can only be claimed after the RFS has been published.",
+        message: "Payout can only be claimed after publication.",
       });
     }
     if (!walletAddress) {
@@ -65,22 +53,6 @@ export const claimPayout = mutation({
         code: "INVALID_WALLET_ADDRESS",
         message: "Link a wallet address before claiming payout.",
       });
-    }
-    if (!walletAddressValidator.test(walletAddress)) {
-      throw new ConvexError({
-        code: "INVALID_WALLET_ADDRESS",
-        message: "Linked wallet address is not a valid 0x-prefixed 40-hex string.",
-      });
-    }
-
-    const payoutAssessment = await ctx.db
-      .query("payoutAssessments")
-      .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
-      .collect()
-      .then((rows) => rows.sort((a, b) => b._creationTime - a._creationTime)[0]);
-
-    if (!payoutAssessment) {
-      throw new ConvexError({ code: "NOT_FOUND", message: "Payout assessment not found." });
     }
 
     const payoutLedger = await ctx.db
@@ -91,7 +63,7 @@ export const claimPayout = mutation({
       throw new ConvexError({ code: "NOT_FOUND", message: "Payout ledger not found." });
     }
 
-    if (payoutLedger.status === "claimed" || payoutAssessment.status === "claimed") {
+    if (payoutLedger.status === "claimed") {
       if (payoutLedger.receiptReference !== args.claimGroupId) {
         throw new ConvexError({
           code: "INVALID_STATE",
@@ -103,38 +75,24 @@ export const claimPayout = mutation({
         .query("payoutEntries")
         .withIndex("by_claimGroup", (q) => q.eq("claimGroupId", args.claimGroupId))
         .collect();
-      const claimedEntryAmountBaseUnits = alreadyClaimedEntries
+      const claimedAmountBaseUnits = alreadyClaimedEntries
         .filter((entry) => entry.rfsId === rfs._id && entry.status === "claimed")
         .reduce((sum, entry) => sum + entry.netAmountBaseUnits, BigInt(0));
-      const claimedAmountBaseUnits =
-        payoutAssessment.finalPayoutBaseUnits + claimedEntryAmountBaseUnits;
 
       return {
         rfsId: rfs._id,
-        claimedAmountBaseUnits,
-        finalPayoutBaseUnits: payoutAssessment.finalPayoutBaseUnits,
-        qualityMultiplierBps: payoutAssessment.qualityMultiplierBps,
-        assessmentStatus: "claimed" as const,
+        claimedAmountBaseUnits:
+          claimedAmountBaseUnits > BigInt(0)
+            ? claimedAmountBaseUnits
+            : payoutLedger.netAmountBaseUnits,
         status: "claimed" as const,
       };
     }
 
-    if (
-      payoutAssessment.status !== "claimable" &&
-      payoutAssessment.status !== "reduced" &&
-      payoutAssessment.status !== "manually_resolved"
-    ) {
+    if (payoutLedger.status !== "claimable") {
       throw new ConvexError({
         code: "INVALID_STATE",
-        message:
-          "Payout is not claimable. Pending, disputed, blocked, or revision-requested assessments cannot be claimed.",
-      });
-    }
-
-    if (payoutAssessment.finalPayoutBaseUnits <= BigInt(0)) {
-      throw new ConvexError({
-        code: "INVALID_STATE",
-        message: "Payout assessment has no releasable amount.",
+        message: "Payout is not claimable.",
       });
     }
 
@@ -144,26 +102,22 @@ export const claimPayout = mutation({
       .collect();
     const claimableEntries = entriesForRfs.filter((entry) => entry.status === "claimable");
 
-    let claimedEntryAmountBaseUnits = BigInt(0);
+    let claimedAmountBaseUnits = BigInt(0);
     for (const entry of claimableEntries) {
-      claimedEntryAmountBaseUnits += entry.netAmountBaseUnits;
+      claimedAmountBaseUnits += entry.netAmountBaseUnits;
       await ctx.db.patch(entry._id, {
         status: "claimed",
         claimGroupId: args.claimGroupId,
       });
     }
 
-    const claimedAmountBaseUnits = payoutAssessment.finalPayoutBaseUnits + claimedEntryAmountBaseUnits;
+    if (claimedAmountBaseUnits === BigInt(0)) {
+      claimedAmountBaseUnits = payoutLedger.netAmountBaseUnits;
+    }
 
     await ctx.db.patch(payoutLedger._id, {
       status: "claimed",
       receiptReference: args.claimGroupId,
-      netAmountBaseUnits: payoutAssessment.finalPayoutBaseUnits,
-    });
-
-    await ctx.db.patch(payoutAssessment._id, {
-      status: "claimed",
-      resolvedAt: Date.now(),
     });
 
     await ctx.db.insert("paymentEvents", {
@@ -179,9 +133,6 @@ export const claimPayout = mutation({
     return {
       rfsId: rfs._id,
       claimedAmountBaseUnits,
-      finalPayoutBaseUnits: payoutAssessment.finalPayoutBaseUnits,
-      qualityMultiplierBps: payoutAssessment.qualityMultiplierBps,
-      assessmentStatus: "claimed" as const,
       status: "claimed" as const,
     };
   },
