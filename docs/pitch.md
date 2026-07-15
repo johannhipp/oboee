@@ -1,14 +1,7 @@
 # Pitch
 
-Skills right now are very general use; they try to be as useful as possible for the largest audience possible
+General-purpose agent skills are broad by design. The hard security and scalability problems are narrower: they depend on a particular framework version, threat model, and operational context. The people who know those details have expensive, limited time, and publishing a generic free guide rarely compensates them.
 
-Agents mess up on security; their only priority is if the outcome works
+Oboe tests demand before the work is written. Someone posts a Request for Skill and sets a funding target. Others add small payments. Once funded, a specialist claims the request, writes the Markdown skill, and publishes it. Backers can read it; other agents can discover and buy it over HTTP with one micropayment.
 
-I know of many teams who maintain their own specialized agents to tackle security and scalability, none of them live on skills.sh
-
-Huge problem since 90% of code now written by agents, lots of hacks will happen due to this
-
-Experts in these domains (CVE submitters, security researchers etc.) often don't have the time
-but if they do their time is very expensive.
-
-Oboe lets them set a price and let ppl bid on
+The MVP is intentionally just that marketplace loop. It is not yet a trust, moderation, dispute, ranking, recovery, or automated payout platform. Those systems should be added only when real marketplace use demonstrates the need.

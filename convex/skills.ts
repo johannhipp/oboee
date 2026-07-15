@@ -1,57 +1,15 @@
 import { ConvexError, type Infer, v } from "convex/values";
 
-import type { Doc } from "./_generated/dataModel";
 import { query } from "./_generated/server";
 import { authComponent } from "./auth";
-import {
-  rfsStatusValidator,
-  skillStatusValidator,
-  payoutAssessmentStatusValidator,
-} from "./lib/validators";
-import {
-  cleanTags,
-  getLatestAssessment,
-  getLatestSkillVersion,
-  userBackedRfs,
-} from "./lib/helpers";
-import { POLICY_V2 } from "./lib/policy";
-import { retirePolicyV1 } from "./lib/legacy";
-import { fallbackAuthorHandle } from "./lib/publicIdentity";
+import { canSubmitRfs } from "./lib/capabilities";
+import { skillMetadataValidator, toSkillMetadata } from "./lib/skillMetadata";
 
 const catalogStatusValidator = v.union(
   v.literal("open"),
   v.literal("funded"),
   v.literal("published"),
 );
-const skillDocValidator = v.object({
-  _id: v.id("skills"),
-  _creationTime: v.number(),
-  rfsId: v.id("rfs"),
-  authorUserId: v.string(),
-  summary: v.string(),
-  tags: v.array(v.string()),
-  purchasePriceBaseUnits: v.int64(),
-  latestVersion: v.optional(v.number()),
-  latestContentHash: v.optional(v.string()),
-  status: skillStatusValidator,
-});
-
-const skillVersionSummaryValidator = v.object({
-  _id: v.id("skillVersions"),
-  version: v.number(),
-  contentHash: v.string(),
-  status: skillStatusValidator,
-  evaluationDeadline: v.number(),
-  submittedAt: v.number(),
-});
-
-const payoutAssessmentSummaryValidator = v.object({
-  _id: v.id("payoutAssessments"),
-  status: payoutAssessmentStatusValidator,
-  qualityMultiplierBps: v.number(),
-  finalPayoutBaseUnits: v.int64(),
-  assessmentReason: v.string(),
-});
 
 const rfsDocValidator = v.object({
   _id: v.id("rfs"),
@@ -66,7 +24,11 @@ const rfsDocValidator = v.object({
   minimumContributionBaseUnits: v.int64(),
   currentAmountBaseUnits: v.int64(),
   fundingTokenAddress: v.string(),
-  status: rfsStatusValidator,
+  status: v.union(
+    v.literal("open"),
+    v.literal("funded"),
+    v.literal("published"),
+  ),
 });
 
 const catalogItemValidator = v.object({
@@ -87,6 +49,15 @@ const catalogItemValidator = v.object({
   purchasePriceBaseUnits: v.optional(v.int64()),
 });
 
+const cleanTags = (tags: string[]) =>
+  Array.from(
+    new Set(
+      tags
+        .map((tag) => tag.trim().toLowerCase())
+        .filter((tag) => tag.length > 0),
+    ),
+  );
+
 const searchMatches = (queryText: string, fields: string[]) => {
   if (!queryText) {
     return true;
@@ -94,34 +65,21 @@ const searchMatches = (queryText: string, fields: string[]) => {
   return fields.some((field) => field.toLowerCase().includes(queryText));
 };
 
-const isPublicSkillVersion = (skill: Doc<"skills">, version: Doc<"skillVersions">) => {
-  if (version.skillId !== skill._id || version.status !== "published") return false;
-  if (skill.policyVersion === POLICY_V2.version && version.policyVersion === POLICY_V2.version) return true;
-  return skill.policyVersion === 1 && version.policyVersion === 1 && version.legacyImported === true;
-};
-
-/** @deprecated Mixed policy-v1 detail is retired. Use skills.getPublic and v2 routes. */
 export const get = query({
   args: {
-    skillId: v.optional(v.id("skills")),
-    rfsId: v.optional(v.id("rfs")),
+    skillId: v.optional(v.string()),
+    rfsId: v.optional(v.string()),
   },
   returns: v.object({
     rfs: v.optional(rfsDocValidator),
-    skill: v.optional(skillDocValidator),
-    latestSkillVersion: v.optional(skillVersionSummaryValidator),
-    payoutAssessment: v.optional(payoutAssessmentSummaryValidator),
-    evaluationCount: v.number(),
+    skill: v.optional(skillMetadataValidator),
     canFund: v.boolean(),
     canClaim: v.boolean(),
+    canSubmit: v.boolean(),
     canBuy: v.boolean(),
     hasAccess: v.boolean(),
-    canEvaluate: v.boolean(),
-    canRevise: v.boolean(),
-    canClaimPayout: v.boolean(),
   }),
   handler: async (ctx, args) => {
-    retirePolicyV1("GET /api/v2/skills/{skillId}");
     if (!args.skillId && !args.rfsId) {
       throw new ConvexError({
         code: "INVALID_ARGUMENT",
@@ -129,12 +87,21 @@ export const get = query({
       });
     }
 
-    let skill = args.skillId ? (await ctx.db.get(args.skillId)) ?? undefined : undefined;
+    const skillId = args.skillId ? ctx.db.normalizeId("skills", args.skillId) : null;
+    const rfsId = args.rfsId ? ctx.db.normalizeId("rfs", args.rfsId) : null;
+    if (args.skillId && !skillId) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Skill not found." });
+    }
+    if (args.rfsId && !rfsId) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
+    }
 
-    if (!skill && args.rfsId) {
+    let skill = skillId ? (await ctx.db.get(skillId)) ?? undefined : undefined;
+
+    if (!skill && rfsId) {
       const skillByRfs = await ctx.db
         .query("skills")
-        .withIndex("by_rfs", (q) => q.eq("rfsId", args.rfsId!))
+        .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
         .first();
       skill = skillByRfs ?? undefined;
     }
@@ -143,7 +110,7 @@ export const get = query({
       throw new ConvexError({ code: "NOT_FOUND", message: "Skill not found." });
     }
 
-    const targetRfsId = args.rfsId ?? skill?.rfsId;
+    const targetRfsId = rfsId ?? skill?.rfsId;
     if (!targetRfsId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
     }
@@ -155,14 +122,9 @@ export const get = query({
 
     const viewer = await authComponent.safeGetAuthUser(ctx);
     let hasAccess = false;
-    let viewerIsBacker = false;
-
-    if (viewer) {
-      viewerIsBacker = await userBackedRfs(ctx, rfs._id, viewer._id);
-    }
 
     if (skill && viewer) {
-      if (skill.authorUserId === viewer._id || rfs.authorUserId === viewer._id || viewerIsBacker) {
+      if (skill.authorUserId === viewer._id) {
         hasAccess = true;
       } else {
         const grant = await ctx.db
@@ -173,91 +135,24 @@ export const get = query({
       }
     }
 
-    const latestSkillVersion = skill
-      ? await getLatestSkillVersion(ctx, skill._id)
-      : undefined;
-    const payoutAssessment = await getLatestAssessment(ctx, rfs._id);
-    const evaluationCount = latestSkillVersion
-      ? await ctx.db
-          .query("evaluationEvents")
-          .withIndex("by_skillVersionId", (q) => q.eq("skillVersionId", latestSkillVersion._id))
-          .collect()
-          .then((events) => events.length)
-      : 0;
-
-    const safeSkill = skill
-      ? {
-          _id: skill._id,
-          _creationTime: skill._creationTime,
-          rfsId: skill.rfsId,
-          authorUserId: skill.authorUserId,
-          summary: skill.summary,
-          tags: skill.tags,
-          purchasePriceBaseUnits: skill.purchasePriceBaseUnits,
-          latestVersion: skill.latestVersion,
-          latestContentHash: skill.latestContentHash,
-          status: skill.status,
-        }
-      : undefined;
-
     const hasClaimant = Boolean(rfs.claimantUserId);
     const canFund = rfs.status === "open";
     const canClaim = rfs.status === "funded" && !hasClaimant;
+    const canSubmit = canSubmitRfs(rfs, viewer?._id);
     const canBuy = Boolean(skill && skill.status === "published" && !hasAccess);
-    const canEvaluate = Boolean(
-      viewer &&
-        latestSkillVersion &&
-        rfs.claimantUserId !== viewer._id &&
-        (rfs.authorUserId === viewer._id || viewerIsBacker) &&
-        (rfs.status === "evaluation_open" || rfs.status === "disputed"),
-    );
-    const canRevise = Boolean(viewer && rfs.claimantUserId === viewer._id && rfs.status === "revision_requested");
-    const canClaimPayout = Boolean(
-      viewer &&
-        rfs.claimantUserId === viewer._id &&
-        rfs.status === "published" &&
-        payoutAssessment &&
-        (payoutAssessment.status === "claimable" ||
-          payoutAssessment.status === "reduced" ||
-          payoutAssessment.status === "manually_resolved") &&
-        payoutAssessment.finalPayoutBaseUnits > BigInt(0),
-    );
 
     return {
       rfs,
-      skill: safeSkill,
-      latestSkillVersion: latestSkillVersion
-        ? {
-            _id: latestSkillVersion._id,
-            version: latestSkillVersion.version,
-            contentHash: latestSkillVersion.contentHash,
-            status: latestSkillVersion.status,
-            evaluationDeadline: latestSkillVersion.evaluationDeadline,
-            submittedAt: latestSkillVersion.submittedAt,
-          }
-        : undefined,
-      payoutAssessment: payoutAssessment
-        ? {
-            _id: payoutAssessment._id,
-            status: payoutAssessment.status,
-            qualityMultiplierBps: payoutAssessment.qualityMultiplierBps,
-            finalPayoutBaseUnits: payoutAssessment.finalPayoutBaseUnits,
-            assessmentReason: payoutAssessment.assessmentReason,
-          }
-        : undefined,
-      evaluationCount,
+      skill: skill ? toSkillMetadata(skill) : undefined,
       canFund,
       canClaim,
+      canSubmit,
       canBuy,
       hasAccess,
-      canEvaluate,
-      canRevise,
-      canClaimPayout,
     };
   },
 });
 
-/** @deprecated Mixed policy-v1 catalog is retired. Use reputation.catalog and v2 routes. */
 export const list = query({
   args: {
     status: v.optional(catalogStatusValidator),
@@ -267,7 +162,6 @@ export const list = query({
   },
   returns: v.array(catalogItemValidator),
   handler: async (ctx, args) => {
-    retirePolicyV1("GET /api/v2/catalog");
     const normalizedQuery = args.q?.trim().toLowerCase() ?? "";
     const requiredTags = cleanTags(args.tags ?? []);
     const statusFilter = args.status;
@@ -326,7 +220,7 @@ export const list = query({
 
       for (const skill of publishedSkills) {
         const rfs = await ctx.db.get(skill.rfsId);
-        if (!rfs || rfs.status !== "published") {
+        if (!rfs) {
           continue;
         }
         skillItems.push({
@@ -365,77 +259,5 @@ export const list = query({
         return true;
       })
       .sort((a, b) => b.createdAt - a.createdAt);
-  },
-});
-
-export const getVersionMetadata = query({
-  args: { skillId: v.string(), skillVersionId: v.string() },
-  returns: v.any(),
-  handler: async (ctx, args) => {
-    const skillId = ctx.db.normalizeId("skills", args.skillId);
-    const skillVersionId = ctx.db.normalizeId("skillVersions", args.skillVersionId);
-    if (!skillId || !skillVersionId) return null;
-    const [skill, version] = await Promise.all([ctx.db.get(skillId), ctx.db.get(skillVersionId)]);
-    if (!skill || !version || !isPublicSkillVersion(skill, version)) return null;
-    return { skillId: skill._id, skillVersionId: version._id, version: version.version, contentHash: version.contentHash, digestAlgorithm: version.digestAlgorithm, summary: version.summary, tags: version.tags, purchasePriceBaseUnits: version.purchasePriceBaseUnits, quarantineState: version.quarantineState ?? "clear", publishedAt: version.publishedAt, policyVersion: version.policyVersion, legacyImported: version.legacyImported ?? false };
-  },
-});
-
-export const getPublic = query({
-  args: { skillId: v.string() },
-  returns: v.any(),
-  handler: async (ctx, args) => {
-    const skillId = ctx.db.normalizeId("skills", args.skillId);
-    if (!skillId) return null;
-    const skill = await ctx.db.get(skillId);
-    if (!skill || !skill.publishedVersionId) return null;
-    const [version, rfs, profile, qualityRows, installs, reviews] = await Promise.all([
-      ctx.db.get(skill.publishedVersionId),
-      ctx.db.get(skill.rfsId),
-      ctx.db.query("publicProfiles").withIndex("by_principal", (query) => query.eq("principalId", skill.authorUserId)).unique(),
-      ctx.db.query("skillQualitySnapshots").filter((query) => query.eq(query.field("skillVersionId"), skill.publishedVersionId!)).collect(),
-      ctx.db.query("installEvents").withIndex("by_skillVersion", (query) => query.eq("skillVersionId", skill.publishedVersionId!)).collect(),
-      ctx.db.query("postUseReviews").withIndex("by_skill_and_state", (query) => query.eq("skillId", skill._id)).collect(),
-    ]);
-    if (!version || !rfs || !isPublicSkillVersion(skill, version)) return null;
-    const legacyImported = version.legacyImported === true;
-    const quality = qualityRows.find((snapshot) => snapshot.tag === "general") ?? qualityRows.sort((left, right) => right.independentCount - left.independentCount)[0];
-    const clusters = new Set(installs.filter((install) => install.adoptionWeightBps > 0).map((install) => String(install.identityClusterId)));
-    return {
-      skillId: skill._id,
-      skillVersionId: version._id,
-      rfsId: rfs._id,
-      title: rfs.title,
-      summary: version.summary,
-      tags: version.tags,
-      authorHandle: profile?.handle ?? fallbackAuthorHandle(skill.authorUserId),
-      version: version.version,
-      contentHash: version.contentHash,
-      digestAlgorithm: version.digestAlgorithm,
-      policyVersion: version.policyVersion ?? skill.policyVersion,
-      legacyImported,
-      purchasePriceBaseUnits: version.purchasePriceBaseUnits,
-      quarantineState: version.quarantineState ?? skill.quarantineState ?? "clear",
-      status: version.status,
-      publishedAt: version.publishedAt,
-      quality: quality ? { score: quality.score, adjustedScore: quality.adjustedScore, confidence: quality.confidence, independentCount: quality.independentCount, computedAt: quality.computedAt } : null,
-      uniqueVerifiedInstalls: clusters.size,
-      reviews: reviews.filter((review) => review.state !== "removed").map((review) => ({ reviewId: review._id, rating: review.rating, outcome: review.outcome, tags: review.tags, text: review.text, state: review.state, createdAt: review.createdAt })),
-    };
-  },
-});
-
-export const getInstallAggregate = query({
-  args: { skillId: v.string() },
-  returns: v.object({ uniqueVerifiedInstalls: v.number(), weightedAdoptionUnits: v.number() }),
-  handler: async (ctx, args) => {
-    const skillId = ctx.db.normalizeId("skills", args.skillId);
-    if (!skillId) return { uniqueVerifiedInstalls: 0, weightedAdoptionUnits: 0 };
-    const skill = await ctx.db.get(skillId);
-    if (!skill?.publishedVersionId) return { uniqueVerifiedInstalls: 0, weightedAdoptionUnits: 0 };
-    const installs = await ctx.db.query("installEvents").withIndex("by_skillVersion", (query) => query.eq("skillVersionId", skill.publishedVersionId!)).collect();
-    const byCluster = new Map<string, number>();
-    for (const install of installs) byCluster.set(String(install.identityClusterId), Math.max(byCluster.get(String(install.identityClusterId)) ?? 0, install.adoptionWeightBps));
-    return { uniqueVerifiedInstalls: [...byCluster.values()].filter((weight) => weight > 0).length, weightedAdoptionUnits: [...byCluster.values()].reduce((sum, weight) => sum + weight / 10_000, 0) };
   },
 });

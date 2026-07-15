@@ -1,108 +1,22 @@
 import { v } from "convex/values";
 
-import { mutation, query, type MutationCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
-import { stableContentHash } from "./lib/helpers";
-import { rfsStatusValidator } from "./lib/validators";
-import { retirePolicyV1 } from "./lib/legacy";
+import { mutation, query } from "./_generated/server";
+import { assertServerSecret } from "./lib/secretBoundary";
 
-const SEED_TOKEN_ADDRESS = "0x1111111111111111111111111111111111111111";
+const MODERATO_PATH_USD = "0x20c0000000000000000000000000000000000000";
 
-const insertPublishedSkillVersion = async (
-  ctx: MutationCtx,
-  args: {
-    rfsId: Id<"rfs">;
-    authorUserId: string;
-    contentMarkdown: string;
-    summary: string;
-    tags: string[];
-    purchasePriceBaseUnits: bigint;
-    grossAmountBaseUnits: bigint;
-  },
-) => {
-  const contentHash = stableContentHash([
-    String(args.rfsId),
-    "1",
-    args.contentMarkdown,
-    args.summary,
-    args.tags.join(","),
-    args.purchasePriceBaseUnits.toString(),
-  ]);
-  const now = Date.now();
-  const platformFeeBaseUnits = args.grossAmountBaseUnits / BigInt(100);
-  const basePayoutBaseUnits = args.grossAmountBaseUnits - platformFeeBaseUnits;
-
-  const skillId = await ctx.db.insert("skills", {
-    rfsId: args.rfsId,
-    authorUserId: args.authorUserId,
-    contentMarkdown: args.contentMarkdown,
-    summary: args.summary,
-    tags: args.tags,
-    purchasePriceBaseUnits: args.purchasePriceBaseUnits,
-    latestVersion: 1,
-    latestContentHash: contentHash,
-    status: "published",
-  });
-
-  const skillVersionId = await ctx.db.insert("skillVersions", {
-    skillId,
-    rfsId: args.rfsId,
-    version: 1,
-    contentHash,
-    contentMarkdown: args.contentMarkdown,
-    summary: args.summary,
-    tags: args.tags,
-    purchasePriceBaseUnits: args.purchasePriceBaseUnits,
-    authorUserId: args.authorUserId,
-    status: "published",
-    submittedAt: now,
-    evaluationDeadline: now,
-    acceptedAt: now,
-    publishedAt: now,
-    revisionOfVersion: undefined,
-  });
-
-  await ctx.db.insert("payoutLedger", {
-    rfsId: args.rfsId,
-    researcherUserId: args.authorUserId,
-    grossAmountBaseUnits: args.grossAmountBaseUnits,
-    platformFeeBaseUnits,
-    netAmountBaseUnits: basePayoutBaseUnits,
-    status: "claimable",
-    receiptReference: undefined,
-  });
-
-  await ctx.db.insert("payoutAssessments", {
-    rfsId: args.rfsId,
-    skillId,
-    skillVersionId,
-    skillVersion: 1,
-    authorUserId: args.authorUserId,
-    grossAmountBaseUnits: args.grossAmountBaseUnits,
-    basePayoutBaseUnits,
-    qualityMultiplierBps: 10_000,
-    finalPayoutBaseUnits: basePayoutBaseUnits,
-    platformFeeBaseUnits,
-    unreleasedAmountBaseUnits: BigInt(0),
-    status: "claimable",
-    assessmentReason: "Seeded published skill treated as accepted first-pass work.",
-    evaluationWindowOpenedAt: now,
-    evaluationWindowClosedAt: now,
-    resolvedAt: now,
-  });
-
-  return skillId;
-};
-
-/** @deprecated This policy-v1 dataset is retained only for migration fixtures. */
 export const seedCveDataset = mutation({
-  args: {},
+  args: { seedSecret: v.string() },
   returns: v.object({
     createdRfsIds: v.array(v.id("rfs")),
     reusedRfsIds: v.array(v.id("rfs")),
   }),
-  handler: async (ctx) => {
-    retirePolicyV1("the policy-v2 fixture and migration test harness");
+  handler: async (ctx, args) => {
+    assertServerSecret(
+      args.seedSecret,
+      "OBOE_SEED_SECRET",
+      "Development seeds are not configured.",
+    );
     const definitions = [
       {
         title: "CVE chain: edge exhaustion -> origin desync",
@@ -177,12 +91,12 @@ export const seedCveDataset = mutation({
         fundingThresholdBaseUnits: def.fundingThresholdBaseUnits,
         minimumContributionBaseUnits: def.minimumContributionBaseUnits,
         currentAmountBaseUnits: def.currentAmountBaseUnits,
-        fundingTokenAddress: SEED_TOKEN_ADDRESS,
+        fundingTokenAddress: MODERATO_PATH_USD,
         status: def.status,
       });
 
       if (def.status === "published") {
-        await insertPublishedSkillVersion(ctx, {
+        await ctx.db.insert("skills", {
           rfsId,
           authorUserId: "seed:researcher:redteam",
           contentMarkdown:
@@ -190,14 +104,17 @@ export const seedCveDataset = mutation({
           summary: "CVE chain containment baseline for MVP testing.",
           tags: def.tags,
           purchasePriceBaseUnits: BigInt(5_000),
-          grossAmountBaseUnits: def.currentAmountBaseUnits,
+          status: "published",
         });
       }
 
       createdRfsIds.push(rfsId);
     }
 
-    return { createdRfsIds, reusedRfsIds };
+    return {
+      createdRfsIds,
+      reusedRfsIds,
+    };
   },
 });
 
@@ -207,7 +124,11 @@ export const listSeededRfs = query({
     v.object({
       id: v.id("rfs"),
       title: v.string(),
-      status: rfsStatusValidator,
+      status: v.union(
+        v.literal("open"),
+        v.literal("funded"),
+        v.literal("published"),
+      ),
       currentAmountBaseUnits: v.int64(),
       fundingThresholdBaseUnits: v.int64(),
     }),
@@ -229,6 +150,7 @@ export const listSeededRfs = query({
 export const publishFundedSeedRfs = mutation({
   args: {
     rfsId: v.id("rfs"),
+    seedSecret: v.string(),
   },
   returns: v.object({
     rfsId: v.id("rfs"),
@@ -236,6 +158,11 @@ export const publishFundedSeedRfs = mutation({
     status: v.literal("published"),
   }),
   handler: async (ctx, args) => {
+    assertServerSecret(
+      args.seedSecret,
+      "OBOE_SEED_SECRET",
+      "Development seeds are not configured.",
+    );
     const rfs = await ctx.db.get(args.rfsId);
     if (!rfs) {
       throw new Error("RFS not found");
@@ -256,26 +183,30 @@ export const publishFundedSeedRfs = mutation({
       if (rfs.status !== "published") {
         await ctx.db.patch(rfs._id, { status: "published" });
       }
-      return { rfsId: rfs._id, skillId: existingSkill._id, status: "published" as const };
+      return {
+        rfsId: rfs._id,
+        skillId: existingSkill._id,
+        status: "published" as const,
+      };
     }
 
-    const contentMarkdown =
-      "# CVE-2023-44487 linked response playbook\n\n## Goal\nStabilize edge and origin during Rapid Reset abuse while preserving forensic visibility.\n\n## Steps\n1. Enable per-connection stream reset thresholds.\n2. Gate expensive origin paths behind adaptive concurrency limits.\n3. Emit challenge-id linked logs at edge and origin for replay analysis.\n4. Roll staged ruleset updates with rollback guardrails.\n";
-    const skillId = await insertPublishedSkillVersion(ctx, {
+    const skillId = await ctx.db.insert("skills", {
       rfsId: rfs._id,
       authorUserId: "seed:researcher:redteam",
-      contentMarkdown,
+      contentMarkdown:
+        "# CVE-2023-44487 linked response playbook\n\n## Goal\nStabilize edge and origin during Rapid Reset abuse while preserving forensic visibility.\n\n## Steps\n1. Enable per-connection stream reset thresholds.\n2. Gate expensive origin paths behind adaptive concurrency limits.\n3. Emit challenge-id linked logs at edge and origin for replay analysis.\n4. Roll staged ruleset updates with rollback guardrails.\n",
       summary: "Published CVE-linked response skill after successful funding.",
       tags: ["cve-2023-44487", "http2", "dos", "gateway"],
       purchasePriceBaseUnits: BigInt(5_000),
-      grossAmountBaseUnits: rfs.currentAmountBaseUnits,
-    });
-
-    await ctx.db.patch(rfs._id, {
-      claimantUserId: "seed:researcher:redteam",
       status: "published",
     });
 
-    return { rfsId: rfs._id, skillId, status: "published" as const };
+    await ctx.db.patch(rfs._id, { status: "published" });
+
+    return {
+      rfsId: rfs._id,
+      skillId,
+      status: "published" as const,
+    };
   },
 });

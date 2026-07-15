@@ -1,9 +1,16 @@
 import type { Id } from "../../convex/_generated/dataModel"
-import type { RFS, RFSStatus } from "./types"
+import type { RFS } from "./types"
 
 const BASE_UNITS_SCALE = 1_000_000
+const tokenAmountFormatter = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 6,
+  useGrouping: false,
+})
 
 export const baseUnitsToNumber = (value: bigint) => Number(value) / BASE_UNITS_SCALE
+
+export const formatTokenAmount = (value: number) => tokenAmountFormatter.format(value)
 
 export const numberToBaseUnitsString = (value: number) => {
   if (!Number.isFinite(value) || value <= 0) {
@@ -20,7 +27,7 @@ type RfsDoc = {
   scope: string
   fundingThresholdBaseUnits: bigint
   currentAmountBaseUnits: bigint
-  status: RFSStatus
+  status: "open" | "funded" | "published"
   authorUserId: string
   claimantUserId?: string
 }

@@ -1,76 +1,102 @@
-# Oboe policy-v2 product specification
+# Oboe marketplace MVP contract
 
-Status: authoritative product summary. The exhaustive algorithm and delivery
-contract is `plans/001-complete-agent-evaluation-payout-system.md`; conflicts in
-older documents are superseded by that plan and this specification.
+This document is the acceptance boundary for the current product. A feature not listed under “In scope” is not required merely because it appeared in an earlier prototype or QA report.
 
-## Purpose
+## Product thesis
 
-Oboe funds specialized agent skills whose quality can be assessed against an
-immutable contract. Agents are the primary requesters, fulfillers, consumers,
-and evaluators. Humans retain authority for credential delegation, custody,
-trusted review, harmful-content adjudication, recovery, and operations.
+Specialists can turn narrow expertise into agent-readable Markdown. Demand is proven before the work is written: someone publishes an RFS, others fund it, a writer fulfills it, and the result becomes a paid skill.
+
+## In scope
+
+### Public catalog
+
+- Browse one mixed catalog of open/funded RFSs and published skills.
+- Search by text and filter by status or tags.
+- Read public metadata, status, funding progress, prices, and summaries.
+- Keep full skill Markdown out of every public metadata response.
+
+### Authenticated author and writer flow
+
+- Email/password sign-up and sign-in through Better Auth.
+- Create an RFS with title, description, scope, tags, threshold, and minimum contribution.
+- Claim a funded, unclaimed RFS; first valid claimant wins atomically.
+- Let only the claimant submit the skill.
+- Auto-publish on submit. There is no review state or reviewer role in this MVP.
+- Save one validated, nonzero EVM payout wallet per account.
+
+### Payment and entitlement flow
+
+- Fund an open RFS through an MPP `tempo` charge.
+- Transition `open -> funded` when accepted contributions reach the threshold.
+- Give the skill author and eligible backers account-based access after publication.
+- Sell a one-shot copy of published content to everyone else through MPP.
+- Record a signed-in principal in the challenge so a cookie-free CLI retry can grant account entitlement.
+- Make payment recording server-authorized, exact-amount, exact-token, and idempotent.
+- Return stable 400/401/402/403/404/409/503 error envelopes.
+
+### Testnet boundary
+
+- Network: Tempo Moderato, chain ID `42431`.
+- Currency: pathUSD at `0x20c0000000000000000000000000000000000000`.
+- Every funding and purchase charge is `1..9000` base units, below `$0.01`.
+- The application fails closed for any other network, token, missing recipient, or missing secret.
+
+### Payout accounting
+
+- Record creator earnings and the MVP 99/1 creator/platform split.
+- Display the accounting balance and saved wallet honestly.
+- Do not present an accounting status as an on-chain payout.
 
 ## Lifecycle
 
-1. A requester runs similar-resource preflight, defines objective criteria that
-   total 10,000 bps, records the unmet gap, and creates a versioned RFS.
-2. Verified principals fund an exact contract revision through amount/token/
-   network-bound payment intents.
-3. Eligible fulfillers submit plans. A timed deterministic score uses relevant
-   reputation, evidence plans, bounded stakeholder preference, and bond
-   readiness. First-come claim and requester force-close do not exist in v2.
-4. The selected fulfiller funds the required bond and submits an immutable
-   SHA-256-bound skill version.
-5. Independent eligible agents run it outside Oboe and submit criterion results
-   with signed, encrypted, reproducible evidence.
-6. Verified cluster/trust quorum derives acceptance, partial payout, one capped
-   revision, rejection, or a sticky harmful hold. Permanent harmful blocking and
-   high-risk ambiguity require an independent human adjudicator.
-7. A final decision atomically creates conserved obligations. Custody broadcasts
-   are idempotent and no obligation settles before an exact external receipt is
-   verified.
-8. Redeemed users may submit one version-bound post-use review. Final reviews
-   affect reputation, ranking, quarantine, and future purchase earnings; they
-   never rewrite a settled RFS payout.
+| State | Allowed action | Next state |
+|---|---|---|
+| `open` | accepted funding | `open` or `funded` |
+| `funded` | one signed-in user claims | `funded` with claimant |
+| `funded` with claimant | claimant submits and auto-publishes | `published` |
+| `published` | entitled read or paid purchase | `published` |
 
-## Authority boundaries
+## Access rules
 
-- Better Auth principals own sessions, verified wallets, API keys, proof keys,
-  and agent delegations. A key authenticates; a delegation further narrows
-  actions, resources, tags, time, token/network, and spend.
-- API callers cannot assert roles, clusters, verifier identity, trust, payout
-  percentage, decision state, receipts, or custody results.
-- Privileged commands are cookie-only, require a recent passkey and active role,
-  confirm the current resource digest, require a reason, and append an audit
-  event. API keys have no equivalent.
-- Restricted evidence is envelope-encrypted, scanned, ACL checked, downloaded as
-  an attachment, and deleted by retention unless under an audited legal hold.
-- Skill content is never public metadata and is treated as untrusted even after
-  purchase.
+- Metadata is always public.
+- Full content is returned only to the skill author, an account with an access grant, or the verified paid request that created a purchase.
+- A paid anonymous request receives content in that one response. Persistent account access requires a challenge bound to a signed-in user.
+- Payment recording treats a challenge ID as globally single-use across funding and purchase. Exact re-entry at the recording boundary returns the original result; changed payment facts return `409 IDEMPOTENCY_CONFLICT`.
 
-## Public protocol
+## Product surface
 
-`/api/v2/openapi.json` is the exact route/schema contract. Resource responses
-carry capabilities; writes require `Idempotency-Key`, and state-sensitive writes
-require `If-Match`. Money is a decimal-string base-unit amount. Unversioned
-marketplace routes return non-executing `410 api_version_retired` tombstones.
+Pages: `/`, `/browse`, `/browse/[id]`, `/new`, `/me`, `/sign-in`, and `/docs`.
 
-## Algorithms
+API routes:
 
-Assignment uses a deterministic stored score snapshot rather than a first claim.
-Payout uses immutable criterion weights, proof quality, independently controlled
-identity clusters, and reviewer trust. Reputation applies time decay, priors,
-cluster deduplication, and final events only. Discovery uses one cursor-paginated
-45% quality, 45% adoption, and 10% recency projection with quarantine exclusion
-and deterministic ties. Constants and executable formulas live in
-`convex/lib/policy.ts`, `assignmentPolicy.ts`, `quorum.ts`, `money.ts`,
-`reputationPolicy.ts`, and `ranking.ts`.
+- `GET /api/skills`
+- `GET /api/skills/[id]`
+- `GET /api/skills/[id]/content`
+- `POST /api/rfs`
+- `GET /api/rfs/[id]`
+- `POST /api/rfs/[id]/fund`
+- `POST /api/rfs/[id]/claim`
+- `POST /api/rfs/[id]/submit`
+- `POST /api/me/wallet`
+- `/api/auth/*`
 
-## Rollout
+## Explicitly out of scope
 
-Policy v2 begins `off`, then `shadow`, then immutable low-value cohorts.
-Deployment-level approval is also required for `on`. Rollback disables new v2
-creation and broadcasts while preserving rows, holds, obligations, and confirmed
-receipts. Production enablement is outside automated implementation and requires
-the operator, settlement, evidence, migration, and rollout runbooks.
+- API keys, delegated authority, delegated budgets, credential recovery, or wallet recovery
+- applicant queues, application scoring, reviewer assignment, review bonds, or slashing
+- moderation, evidence bundles, automated evaluation, quality scoring, or approval gates
+- reputation, rankings, ratings, version history, update guarantees, or trust badges
+- disputes, refunds, appeals, arbitration, or legal/compliance workflows
+- admin consoles, operations dashboards, production observability programs, or policy migrations
+- automated on-chain payout settlement or payout claims
+- mainnet payment acceptance
+
+These may become separate, evidence-driven product proposals. They are not hidden MVP requirements.
+
+## Release criteria
+
+1. Unit tests cover capabilities, payment validation, replay handling, seed boundaries, serialization, and money formatting.
+2. Typecheck, lint, and production build pass.
+3. Browser E2E covers public discovery, auth, wallet persistence, RFS creation, and the 402 handoff.
+4. At least one real Moderato funding payment and one real Moderato purchase are independently verified by transaction receipt.
+5. Desktop and mobile dogfood find no unresolved critical or high issue in the core flow.

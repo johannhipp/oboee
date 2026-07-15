@@ -1,79 +1,55 @@
 # Oboe
 
-Oboe is a criteria-bound crowdfunding and marketplace system for reusable agent
-skills. Requesters fund an RFS, fulfillers compete through timed applications,
-independent agents evaluate immutable submissions, and settlement follows the
-resulting criterion decision.
+Oboe is a compact marketplace for crowdfunded AI-agent skill files. A user creates a Request for Skill (RFS), people or agents fund it, a signed-in writer claims and submits it, and the skill is published automatically. Backers can read it through their account; everyone else can buy a one-shot copy over MPP.
 
-## Product contract
+The current product is deliberately an MVP. It does not include moderation, disputes, recovery, reviewer tooling, reputation, ranking, evaluation, applications, bonds, versioning, API keys, delegations, or automated payout settlement.
 
-- `GET /api/v2/catalog` is the ranked public skill catalog.
-- `GET/POST /api/v2/rfs` is the policy-v2 request surface.
-- `GET /.well-known/oboe-agent.json` discovers OpenAPI and the agent guide.
-- Unversioned marketplace routes are retired tombstones. They return `410
-  api_version_retired` with a concrete v2 replacement and execute no business
-  logic.
-- API clients submit intent and evidence. Roles, identity clusters, evidence
-  verification, payout multipliers, and settlement receipts are server-derived.
+## Product flow
 
-See [the current specification](docs/spec.md), [OpenAPI documentation](/docs),
-and [the implementation plan](plans/001-complete-agent-evaluation-payout-system.md).
+1. Browse and search public RFS and skill metadata.
+2. Sign in to create an RFS, claim a funded request, submit a skill, or save one payout wallet.
+3. Fund an open RFS with a Tempo Moderato pathUSD MPP payment below `$0.01`.
+4. Submit as the claimant; the MVP auto-publishes the skill.
+5. Read as its author/backer, or buy the content with one MPP payment below `$0.01`.
 
-## Local development
+## Run locally
+
+Prerequisites: Node 24, a Convex development deployment, and a Tempo Moderato escrow address.
 
 ```bash
 npm ci
 cp .env.example .env.local
+npx convex dev
 npm run dev
 ```
 
-Configure a nonproduction Convex deployment before exercising authenticated
-flows. Money writes default off. Never use production custody or mainnet funds
-for the automated suites.
+Fill every required value in `.env.local`. Oboe fails closed unless `MPP_NETWORK=tempo-moderato`, chain `42431` pathUSD is selected, and the escrow/payment secrets are valid. Never reuse production secrets in local development.
 
-### Seeded frontend mode
-
-To inspect realistic public and authenticated screens locally, run:
-
-```bash
-npm run dev:fixtures
-```
-
-Use `npm run seed:fixtures` when you only need to refresh the data without
-leaving the fixture app running.
-
-The fixture runner creates seven local Better Auth personas, seeds an idempotent
-Convex graph with requests, skills, reviews, evidence, wallets, payouts,
-settlements, recovery, migration, and operator records, and writes the route
-IDs to the ignored `.dev/oboe-fixture.json` manifest. The fixture server uses
-`http://localhost:3110` so it can run alongside the normal app.
-
-Run the complete browser matrix—including anonymous boundaries and every
-authenticated persona—with:
-
-```bash
-npm run test:e2e:seeded
-```
-
-Fixture writes are guarded by `OBOE_ENVIRONMENT=nonproduction` and
-`OBOE_NONPRODUCTION_BOOTSTRAP_ENABLED=true`; the seed functions are internal
-Convex functions and are not available to the browser.
-
-## Commit messages
-
-This project uses [Conventional Commits 1.0.0](COMMIT_CONVENTIONS.md). The
-standard applies to human contributors and AI agents alike, so agents should
-use it for every commit, including documentation-only changes.
-
-## Verification
+Run the verification gates with:
 
 ```bash
 npm test
-npm run lint
 npm run typecheck
+npm run lint
 npm run build
 npm run test:e2e
 ```
 
-The stack is Next.js 16, React 19, Convex, Better Auth, TypeScript, Tailwind CSS,
-MPP, Playwright, and Vitest.
+## Payments
+
+`POST /api/rfs/:id/fund` and `GET /api/skills/:id/content` use HTTP 402 MPP challenges. The browser shows a copyable `mppx` command; agents can use [`scripts/pay.sh`](scripts/pay.sh). Funding and buying may be anonymous. If the first challenge was created while signed in, its signed principal grants the resulting contribution or purchase to that account even when the command-line retry has no browser cookie.
+
+All current payments are testnet-only. Automated creator payout settlement is outside the MVP; the profile exposes a payout address and accounting balance without claiming that funds were transferred.
+
+## Documentation
+
+- [`docs/spec.md`](docs/spec.md): current product contract and explicit non-goals
+- [`docs/backend-integration.md`](docs/backend-integration.md): implemented boundaries and deployment configuration
+- [`docs/agent-testnet-e2e.md`](docs/agent-testnet-e2e.md): one-shot agent payment demo
+- [`docs/qa/mvp-dogfood-20260715.md`](docs/qa/mvp-dogfood-20260715.md): current QA evidence
+
+## Deployment warning
+
+The MVP schema is intentionally smaller than the previous policy-v2 prototype. Do not deploy it over a policy-v2 Convex production deployment without a reviewed backup and migration plan. QA uses a separate development deployment.
+
+Stack: Next.js 16.2, React 19, Convex, Better Auth, TypeScript, and mppx on Tempo Moderato.

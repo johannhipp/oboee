@@ -1,127 +1,90 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import { anyApi } from "convex/server";
-import { fetchQuery } from "convex/nextjs";
+import type { Metadata } from "next"
+import Link from "next/link"
+import { fetchQuery } from "convex/nextjs"
+import { api } from "../../../convex/_generated/api"
+import { RFSRow } from "@/components/rfs-row"
+import { toRfsViewModel } from "@/lib/view-models"
 
-import { CopyBox } from "@/components/copy-box";
-import { DataToast } from "@/components/data-fallback";
-import { MarketplaceRow } from "@/components/marketplace-row";
-import { TechnicalDetails } from "@/components/technical-details";
-import { convexUnavailableMessage } from "@/lib/auth-server";
-import { searchHandoff } from "@/lib/handoff";
-import { buildCatalogReadModel, buildPublicRfsListReadModel } from "@/lib/read-models/public";
+export const dynamic = "force-dynamic"
 
-export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Browse | Oboe", alternates: { canonical: "/browse" } };
+export const metadata: Metadata = { title: "Browse | Oboe" }
 
-type Search = { q?: string; status?: string; tag?: string | string[]; author?: string; cursor?: string };
+const isStatus = (value: string | undefined) =>
+  value === "open" || value === "funded" || value === "published"
 
-const inputClass = "h-10 w-full border-0 border-b border-border bg-transparent px-0 text-sm text-foreground outline-none transition-colors focus:border-foreground";
+export default async function BrowsePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; q?: string }>
+}) {
+  const params = await searchParams
+  const status = isStatus(params.status) ? params.status : undefined
+  const q = params.q?.trim().toLowerCase() ?? ""
 
-export default async function BrowsePage({ searchParams }: { searchParams: Promise<Search> }) {
-  const params = await searchParams;
-  const tags = Array.isArray(params.tag) ? params.tag : params.tag ? [params.tag] : [];
-  let unavailable = false;
-  let skills: ReturnType<typeof buildCatalogReadModel> = { items: [], nextCursor: null };
-  let requests: ReturnType<typeof buildPublicRfsListReadModel> = [];
+  const rows = await fetchQuery(api.rfs.list, { status })
+  const filtered = rows.filter((rfs) => {
+    if (!q) {
+      return true
+    }
+    return [rfs.title, rfs.description, rfs.scope, ...rfs.tags]
+      .join(" ")
+      .toLowerCase()
+      .includes(q)
+  })
 
-  try {
-    const [catalog, rfs] = await Promise.all([
-      fetchQuery(anyApi.reputation.catalog, { authorHandle: params.author, tags, cursor: params.cursor, limit: 30 }),
-      fetchQuery(anyApi.rfsV2.listPublic, { status: params.status || undefined, limit: 50 }),
-    ]);
-    skills = buildCatalogReadModel(catalog);
-    requests = buildPublicRfsListReadModel(rfs);
-  } catch {
-    unavailable = true;
-  }
+  const visibleRfs = filtered.map(toRfsViewModel)
 
-  const query = params.q?.trim().toLowerCase();
-  const matchesQuery = (value: string) => !query || value.toLowerCase().includes(query);
-  const visibleRequests = requests.filter((item) =>
-    matchesQuery(`${item.title} ${item.description} ${item.scope} ${item.tags.join(" ")}`) &&
-    (tags.length === 0 || tags.every((tag) => item.tags.includes(tag))),
-  );
-  const visibleSkills = skills.items.filter((item) => matchesQuery(`${item.title ?? item.category} ${item.summary ?? ""} ${item.authorHandle} ${item.tags.join(" ")}`));
+  const pills = [
+    { label: "all", href: "/browse", active: !status },
+    { label: "open", href: "/browse?status=open", active: status === "open" },
+    { label: "funded", href: "/browse?status=funded", active: status === "funded" },
+    {
+      label: "published",
+      href: "/browse?status=published",
+      active: status === "published",
+    },
+  ]
 
   return (
-    <main className="mx-auto max-w-5xl py-10 sm:py-12">
-      <header className="flex flex-col gap-5 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Catalog</p>
-          <h1 className="mt-2 text-2xl font-medium tracking-tight">Marketplace</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Active requests and published skill versions with their current state.
-          </p>
-        </div>
-        <Link href="/new" className="w-fit font-mono text-xs underline underline-offset-4 hover:no-underline">
-          create a request
-        </Link>
-      </header>
+    <section>
+      <h1 className="text-xl font-medium tracking-tight mb-6 mt-8">Browse</h1>
 
-      {unavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
-
-      <form action="/browse" className="grid gap-3 border-b border-border py-5 lg:grid-cols-[minmax(0,1fr)_11rem_11rem_auto] lg:items-end">
-        <label className="grid gap-1.5 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-          Search the catalog
-          <input name="q" defaultValue={params.q} className={inputClass} />
-        </label>
-        <label className="grid gap-1.5 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-          Request stage
-          <select name="status" defaultValue={params.status ?? ""} className={`${inputClass} px-2`}>
-            <option value="">all requests</option>
-            <option value="open">open</option>
-            <option value="funded">funded</option>
-            <option value="evaluation_open">in review</option>
-            <option value="disputed">disputed</option>
-          </select>
-        </label>
-        <label className="grid gap-1.5 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-          Topic
-          <input name="tag" defaultValue={tags[0]} className={inputClass} />
-        </label>
-          <button className="h-10 border-b border-foreground px-1 font-mono text-xs transition-colors hover:text-muted-foreground">
-          Search
-        </button>
-      </form>
-
-      <div className="grid gap-10 py-8 lg:grid-cols-[minmax(0,1fr)_16rem] lg:gap-12">
-        <div className="min-w-0">
-          <section aria-labelledby="requests-heading">
-            <div className="mb-3">
-              <div className="flex items-baseline justify-between gap-4">
-                <h2 id="requests-heading" className="font-mono text-xs uppercase tracking-wide">Requests</h2>
-                <span className="font-mono text-[10px] text-muted-foreground">{visibleRequests.length} shown</span>
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">Requests with a scope, acceptance criteria, and funding state.</p>
-            </div>
-            {visibleRequests.map((item) => <MarketplaceRow key={item.id} item={{ id: item.id, kind: "rfs", title: item.title, status: item.status, tags: item.tags, amount: item.totalFundingTargetBaseUnits }} />)}
-            {!unavailable && visibleRequests.length === 0 ? <p className="border-y border-border py-6 text-sm text-muted-foreground">No matching requests.</p> : null}
-          </section>
-
-          <section aria-labelledby="skills-heading" className="mt-10">
-            <div className="mb-3">
-              <div className="flex items-baseline justify-between gap-4">
-                <h2 id="skills-heading" className="font-mono text-xs uppercase tracking-wide">Published skills</h2>
-                <span className="font-mono text-[10px] text-muted-foreground">{visibleSkills.length} shown</span>
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">Published versions with quality and adoption signals.</p>
-            </div>
-            {visibleSkills.map((item) => <MarketplaceRow key={item.id} item={{ id: item.id, kind: "skill", title: item.title ?? item.category, status: item.quarantineState, tags: item.tags, authorHandle: item.authorHandle, scoreBps: item.totalBps, confidence: item.confidence }} />)}
-            {!unavailable && visibleSkills.length === 0 ? <p className="border-y border-border py-6 text-sm text-muted-foreground">No matching published skills.</p> : null}
-            {skills.nextCursor ? <Link className="mt-4 inline-block font-mono text-xs underline underline-offset-4" href={{ pathname: "/browse", query: { ...params, cursor: skills.nextCursor } }}>next page</Link> : null}
-          </section>
-        </div>
-
-        <aside className="min-w-0 lg:sticky lg:top-24 lg:self-start">
-          <TechnicalDetails summary="Machine reference" hint="For clients">
-            <p className="mb-3 text-sm leading-6 text-muted-foreground">
-              Copy the machine-readable locator for this search when a client needs it.
-            </p>
-            <CopyBox label="Copy search handoff" text={searchHandoff({ q: params.q, status: params.status, tags, author: params.author })} />
-          </TechnicalDetails>
-        </aside>
+      <div className="flex items-center gap-3 mb-6 flex-wrap">
+        {pills.map((pill) => (
+          <Link
+            key={pill.label}
+            href={pill.href}
+            className={
+              pill.active
+                ? "font-mono text-xs px-2.5 py-1 rounded-full bg-gray-900 text-white"
+                : "font-mono text-xs px-2.5 py-1 rounded-full text-muted-foreground ring-1 ring-gray-200 hover:ring-gray-300"
+            }
+          >
+            {pill.label}
+          </Link>
+        ))}
+        <form action="/browse" method="get" className="w-full max-w-sm">
+          {status ? <input type="hidden" name="status" value={status} /> : null}
+          <input
+            name="q"
+            defaultValue={params.q ?? ""}
+            type="text"
+            placeholder="search skills and requests..."
+            className="bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 font-mono text-sm placeholder:text-gray-400 w-full"
+          />
+        </form>
       </div>
-    </main>
-  );
+
+      <div className="flex items-center gap-4 px-3 py-2 text-xs font-mono uppercase text-muted-foreground border-b border-gray-200 mb-1">
+        <span className="flex-1">title</span>
+        <span className="w-20">status</span>
+        <span className="hidden sm:block w-28 text-right">funded</span>
+        <span className="hidden md:block w-24">author</span>
+      </div>
+
+      {visibleRfs.map((rfs) => (
+        <RFSRow key={rfs.id} rfs={rfs} />
+      ))}
+    </section>
+  )
 }

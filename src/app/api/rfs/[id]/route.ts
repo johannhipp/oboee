@@ -1,5 +1,15 @@
-import { retiredApiResponse } from "@/lib/api-v2/legacy-routes";
+import { api } from "../../../../../convex/_generated/api";
+import { fetchQuery } from "convex/nextjs";
+
+import { errorResponseFrom } from "../../_lib/responses";
+import { toJsonSafe } from "@/lib/json";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  return retiredApiResponse({ replacementMethod: "GET", replacementPath: `/api/v2/rfs/${(await context.params).id}`, message: "The unversioned RFS representation is retired. Read its policy-v2 contract." });
+  try {
+    const { id } = await context.params;
+    const result = await fetchQuery(api.rfs.getPublic, { rfsId: id });
+    return Response.json(toJsonSafe(result));
+  } catch (error) {
+    return errorResponseFrom(error);
+  }
 }

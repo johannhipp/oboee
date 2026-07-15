@@ -10,7 +10,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["convex/**/*.test.ts", "shared/**/*.test.ts", "src/**/*.test.ts"],
+    include: ["convex/**/*.test.ts", "scripts/**/*.test.ts", "src/**/*.test.ts"],
     restoreMocks: true,
   },
 });

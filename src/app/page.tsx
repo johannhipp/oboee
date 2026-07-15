@@ -1,111 +1,63 @@
-import { anyApi } from "convex/server";
-import { fetchQuery } from "convex/nextjs";
-import Link from "next/link";
+import { OBOE_ASCII } from "@/lib/constants"
+import { fetchQuery } from "convex/nextjs"
+import { api } from "../../convex/_generated/api"
+import { RFSRow } from "@/components/rfs-row"
+import { AsciiBox } from "@/components/ascii-box"
+import { CopyBox } from "@/components/copy-box"
+import { toRfsViewModel } from "@/lib/view-models"
 
-import { CopyBox } from "@/components/copy-box";
-import { DataToast } from "@/components/data-fallback";
-import { MarketplaceRow } from "@/components/marketplace-row";
-import { TechnicalDetails } from "@/components/technical-details";
-import { convexUnavailableMessage } from "@/lib/auth-server";
-import { OBOE_ASCII } from "@/lib/constants";
-import {
-  buildCatalogReadModel,
-  buildPublicRfsListReadModel,
-} from "@/lib/read-models/public";
-
-export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic"
 
 export default async function Home() {
-  let unavailable = false;
-  let requests: ReturnType<typeof buildPublicRfsListReadModel> = [];
-  let catalog: ReturnType<typeof buildCatalogReadModel> = {
-    items: [],
-    nextCursor: null,
-  };
-  try {
-    const [rfs, skills] = await Promise.all([
-      fetchQuery(anyApi.rfsV2.listPublic, { status: "open", limit: 8 }),
-      fetchQuery(anyApi.reputation.catalog, { tags: [], limit: 6 }),
-    ]);
-    requests = buildPublicRfsListReadModel(rfs);
-    catalog = buildCatalogReadModel(skills);
-  } catch {
-    unavailable = true;
-  }
+  const [openRows, publishedRows] = await Promise.all([
+    fetchQuery(api.rfs.list, { status: "open" }),
+    fetchQuery(api.rfs.list, { status: "published" }),
+  ])
+
+  const openRequests = openRows.map(toRfsViewModel)
+  const recentlyPublished = publishedRows.map(toRfsViewModel).slice(0, 4)
 
   return (
-    <main className="mx-auto max-w-3xl py-8">
-      {unavailable ? <DataToast message={convexUnavailableMessage()} /> : null}
-      <section className="flex min-h-[38vh] flex-col items-center justify-center border-b border-border pb-8 text-center">
-        <pre className="select-none whitespace-pre font-[family-name:var(--font-fira-mono)] text-[15px] leading-[125%] text-gray-400">
+    <div className="my-8 max-w-2xl min-w-0 mx-auto">
+      <div className="flex flex-col items-center text-center">
+        <pre className="max-w-full overflow-hidden text-[8px] sm:text-[15px] tracking-[-1px] leading-[125%] text-gray-400 select-none whitespace-pre font-[family-name:var(--font-fira-mono)]">
           {OBOE_ASCII}
         </pre>
-        <h1 className="mt-5 text-2xl font-medium tracking-[-0.03em]">
-          Requests, skills, evidence, and settlement.
-        </h1>
-        <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          Oboe records the work requested from agents, the criteria used to evaluate it, and the state that determines settlement.
+        <p className="text-[19px] tracking-tight text-gray-900 font-mono font-medium uppercase mt-6">
+          Crowdfunded agent skills
         </p>
-        <div className="mt-6 w-full max-w-xl text-left">
-          <TechnicalDetails summary="Agent discovery" hint="Optional">
-            <p className="mb-3 text-sm leading-6 text-muted-foreground">Clients should read the operating guide before using the API.</p>
-            <CopyBox label="Copy discovery sequence" text="Read https://oboe.sh/SKILL.md and use its v2 capability workflow" />
-          </TechnicalDetails>
-        </div>
-      </section>
-      <section className="py-8">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-mono text-xs uppercase text-muted-foreground">
-            Open requests
-          </h2>
-          <Link href="/browse" className="font-mono text-xs underline">
-            browse all
-          </Link>
-        </div>
-        {requests.map((item) => (
-          <MarketplaceRow
-            key={item.id}
-            item={{
-              id: item.id,
-              kind: "rfs",
-              title: item.title,
-              status: item.status,
-              tags: item.tags,
-              amount: item.totalFundingTargetBaseUnits,
-            }}
-          />
-        ))}
-        {!unavailable && requests.length === 0 ? (
-          <p className="border-y border-border py-6 text-sm text-muted-foreground">
-            No open requests.
+        <div className="mt-8 w-full max-w-xl space-y-1.5">
+          <p className="text-[10px] font-mono uppercase text-muted-foreground tracking-wide">
+            paste this into your agent
           </p>
-        ) : null}
-      </section>
-      <section className="pb-8">
-        <h2 className="mb-3 font-mono text-xs uppercase text-muted-foreground">
-          Published skills
+          <CopyBox text="Read https://oboe.sh/SKILL.md and follow the instructions to set up oboe" />
+          <a href="https://mpp.dev" className="inline-block text-[10px] font-mono text-muted-foreground underline hover:text-foreground transition-colors duration-150 pt-0.5">
+            learn more about MPP by Tempo
+          </a>
+        </div>
+      </div>
+
+      <div className="mt-16">
+        <h2 className="text-sm font-mono font-medium tracking-normal text-gray-900 uppercase mb-4">
+          open requests
         </h2>
-        {catalog.items.map((item) => (
-          <MarketplaceRow
-            key={item.id}
-            item={{
-              id: item.id,
-              kind: "skill",
-              title: item.title ?? item.category,
-              status: item.quarantineState,
-              tags: item.tags,
-              authorHandle: item.authorHandle,
-              scoreBps: item.totalBps,
-              confidence: item.confidence,
-            }}
-          />
-        ))}
-        {!unavailable && catalog.items.length === 0 ? (
-          <p className="border-y border-border py-6 text-sm text-muted-foreground">
-            No published skills.
-          </p>
-        ) : null}
-      </section>
-    </main>
-  );
+        <AsciiBox title="open">
+          {openRequests.map((rfs) => (
+            <RFSRow key={rfs.id} rfs={rfs} />
+          ))}
+        </AsciiBox>
+      </div>
+
+      <div className="mt-8">
+        <h2 className="text-sm font-mono font-medium tracking-normal text-gray-900 uppercase mb-4">
+          recently published
+        </h2>
+        <AsciiBox title="published">
+          {recentlyPublished.map((rfs) => (
+            <RFSRow key={rfs.id} rfs={rfs} />
+          ))}
+        </AsciiBox>
+      </div>
+    </div>
+  )
 }

@@ -1,5 +1,30 @@
-import { retiredApiResponse } from "@/lib/api-v2/legacy-routes";
+import { fetchQuery } from "convex/nextjs";
 
-export async function GET() {
-  return retiredApiResponse({ replacementMethod: "GET", replacementPath: "/api/v2/catalog", message: "The unversioned catalog is retired. Use the ranked policy-v2 catalog." });
+import { api } from "../../../../convex/_generated/api";
+import { errorResponseFrom } from "../_lib/responses";
+import { toJsonSafe } from "@/lib/json";
+import { readTagParams } from "@/lib/api-params";
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+
+    const status = searchParams.get("status") ?? undefined;
+    const q = searchParams.get("q") ?? undefined;
+    const authorId = searchParams.get("authorId") ?? undefined;
+
+    const tags = readTagParams(searchParams);
+
+    const result = await fetchQuery(api.skills.list, {
+      status:
+        status === "open" || status === "funded" || status === "published" ? status : undefined,
+      q,
+      authorId,
+      tags,
+    });
+
+    return Response.json(toJsonSafe(result));
+  } catch (error) {
+    return errorResponseFrom(error);
+  }
 }
