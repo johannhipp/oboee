@@ -1,213 +1,72 @@
-# Backend integration spec
+# Backend and payment integration
 
-The frontend is a static shell. Every page imports from `src/lib/mock-data.ts` and renders hardcoded data. This doc maps each mock dependency to the real backend work needed to replace it.
+This describes the implemented MVP, not a future architecture plan.
 
-## Database schema
+## Runtime boundaries
 
-Use whatever ORM/DB you want. The TypeScript interfaces in `src/lib/types.ts` are the contract. Match them exactly.
+- Next.js App Router owns pages, JSON route handlers, auth-cookie lookup, MPP challenge/verification, and stable HTTP responses.
+- Convex owns marketplace records, authorization decisions, state transitions, entitlement, and idempotent payment recording.
+- Better Auth runs through the Convex integration and the Next `/api/auth/*` proxy.
+- Tempo Moderato settles pathUSD test payments to one configured escrow address.
 
-```sql
-users
-  id            text primary key
-  name          text not null
-  email         text unique not null
-  wallet_address text
-  created_at    timestamp default now()
+The paid HTTP route is the only component allowed to call the protected Convex payment mutations. It supplies `OBOE_PAYMENT_RECORDING_SECRET`; Convex compares that secret in constant time before accepting payment facts.
 
-rfs
-  id            text primary key
-  title         text not null
-  description   text not null
-  scope         text not null
-  funding_threshold numeric not null
-  current_amount   numeric default 0
-  status        text check (status in ('open','funded','fulfilled','published')) default 'open'
-  author_id     text references users(id)
-  claimant_id   text references users(id) nullable
-  created_at    timestamp default now()
+## Data model
 
-contributions
-  id            text primary key
-  user_id       text references users(id)
-  rfs_id        text references rfs(id)
-  amount        numeric not null
-  created_at    timestamp default now()
+The marketplace uses nine application tables:
 
-skills
-  id            text primary key
-  rfs_id        text references rfs(id) unique
-  title         text not null
-  content       text not null
-  created_at    timestamp default now()
+- `rfs`: author, optional claimant, request copy, tags, thresholds, token, amount, and lifecycle state
+- `contributions`: backer principal, exact amount/token, challenge ID, receipt reference, status
+- `skills`: one submitted Markdown skill per RFS, summary, tags, price, status
+- `purchases`: buyer principal, exact amount/token, challenge ID, receipt reference
+- `accessGrants`: account entitlement from backing or purchase
+- `payoutWallets`: one saved payout address per account
+- `payoutLedger` and `payoutEntries`: accounting only; no settlement claim endpoint
+- `paymentEvents`: normalized funding and purchase audit facts
 
-purchases
-  id            text primary key
-  user_id       text references users(id)
-  skill_id      text references skills(id)
-  amount        numeric not null
-  created_at    timestamp default now()
-```
+Better Auth component tables are managed separately by its Convex component.
 
-Auto-transition `rfs.status` from `open` to `funded` when `current_amount >= funding_threshold`. Do this in the fund endpoint, not a cron.
+## Payment boundary
 
-## Auth
+`src/lib/mpp.ts` rejects configuration unless all of these are true:
 
-BetterAuth. The frontend has no auth wiring yet. You need to:
+- `MPP_NETWORK=tempo-moderato`
+- funding token equals Moderato pathUSD
+- the escrow address is a valid nonzero address
+- MPP and recording secrets are at least 32 characters
+- RPC is HTTPS, except an explicit localhost test RPC
+- an enabled fee payer has a valid 32-byte private key
 
-1. Set up BetterAuth at `src/lib/auth.ts`
-2. Create `src/app/api/auth/[...all]/route.ts` catch-all
-3. Add sign-in/sign-up UI (keep the ASCII aesthetic -- monospace inputs, no component library)
-4. Gate `/new` and `/me` behind auth. `/browse` and `/` stay public.
-5. Replace `getCurrentUser()` calls in `src/app/me/page.tsx` with the real session user
-6. The header (`src/components/header.tsx`) needs a sign-in link when unauthenticated, user name when authenticated. This component is already `'use client'`.
+`POST /api/rfs/[id]/fund` parses a decimal pathUSD amount and caps it at 9000 base units. `GET /api/skills/[id]/content` charges the listing's exact stored price and rejects listings above the cap. The verified credential—not the request body—is authoritative when Convex records amount, token, challenge, and receipt.
 
-User's `walletAddress` can be set in profile or derived from BetterAuth session if using wallet-based auth.
+A signed-in initial request adds the Better Auth user ID as an HMAC-bound MPP `externalId`. This lets a separate `mppx` process complete the retry without copying the user's auth cookie. Convex rejects any mismatch between that signed payment principal and an authenticated principal.
 
-## API routes
+## Idempotency
 
-### Reads (replace mock-data.ts imports)
+Challenge IDs are indexed in both the domain record and the global `paymentEvents` ledger. Re-entering the recording boundary with the same immutable payment facts returns the original contribution or purchase. Reusing one challenge across funding and purchase, or with a different resource, principal, amount, token, or receipt, fails with `IDEMPOTENCY_CONFLICT`. The RFS total and payout accounting are therefore not incremented twice.
 
-These are the mock functions each page calls. Replace with real DB queries. Keep the same return types.
+## Environment
 
-| Page | Currently imports from mock-data.ts | Replace with |
-|------|-------------------------------------|--------------|
-| `page.tsx` (landing) | `rfsList` filtered by status | DB query: `SELECT * FROM rfs WHERE status = 'open'` and `WHERE status = 'published' ORDER BY created_at DESC LIMIT 4` |
-| `browse/page.tsx` | `rfsList` (all, sorted) | DB query: `SELECT * FROM rfs ORDER BY ...` with optional `?status=` and `?q=` query params |
-| `browse/[id]/page.tsx` | `getRFSById`, `getContributionsForRFS`, `getSkillForRFS`, `getUserById` | DB queries by id. Join contributions and user for the backers list. |
-| `me/page.tsx` | `getCurrentUser`, `getUserContributions`, `getUserPurchases`, `rfsList`, `skills` | Session user id → query rfs, contributions, purchases |
-| `new/page.tsx` | nothing (static form) | Needs form action (see writes below) |
+Copy `.env.example` and provide:
 
-You can do these as direct DB calls in server components (no API route needed) or via API routes if you prefer. Server component DB calls are simpler for reads.
+| Variable | Location | Purpose |
+|---|---|---|
+| `BETTER_AUTH_SECRET` | Next + Convex | Better Auth signing secret |
+| `SITE_URL` / `NEXT_PUBLIC_SITE_URL` | Next + Convex | trusted application origin |
+| `NEXT_PUBLIC_CONVEX_URL` | Next | Convex functions URL |
+| `NEXT_PUBLIC_CONVEX_SITE_URL` | Next | Convex HTTP/auth site URL |
+| `MPP_SECRET_KEY` | Next | MPP challenge signing secret |
+| `MPP_NETWORK` | Next | must be `tempo-moderato` |
+| `MPP_RECIPIENT_ESCROW_ADDRESS` | Next | testnet escrow recipient |
+| `MPP_FUNDING_TOKEN_ADDRESS` | Next | Moderato pathUSD |
+| `OBOE_MPP_RPC_URL` | Next | Moderato RPC endpoint |
+| `OBOE_PAYMENT_RECORDING_SECRET` | Next + Convex | protects payment mutations |
+| `OBOE_SEED_SECRET` | Convex | protects explicit fixture mutations |
 
-### Writes (new API routes)
+`MPP_ENABLE_FEE_PAYER` is false by default. If enabled, `MPP_FEE_PAYER_PRIVATE_KEY` must be a dedicated testnet key.
 
-```
-POST /api/rfs
-  Auth: required
-  Body: { title, description, scope, fundingThreshold }
-  Action: Insert new RFS with status 'open', author_id from session
-  Response: { id } (redirect to /browse/{id})
-  Wire to: <form> in src/app/new/page.tsx (add server action or form action)
+## Development deployment
 
-POST /api/rfs/[id]/fund
-  Auth: required (for tracking backer)
-  MPP: mppx.charge({ amount: contribution_amount })
-  Body: { amount }
-  Action:
-    1. Verify MPP payment
-    2. Insert contribution (user_id, rfs_id, amount)
-    3. UPDATE rfs SET current_amount = current_amount + amount
-    4. If current_amount >= funding_threshold: UPDATE status = 'funded'
-  Response: { rfs_id, new_total, status }
-  Wire to: "fund this request" button in src/app/browse/[id]/page.tsx
+Use a separate Convex development project for MVP QA. Run `npx convex dev --once` after schema or function changes so generated types and deployed functions agree. Seed helpers are never public without the configured seed secret.
 
-POST /api/rfs/[id]/claim
-  Auth: required
-  Action: UPDATE rfs SET claimant_id = session.user.id, status = 'fulfilled' WHERE status = 'funded'
-  Guard: Only one claimant. Reject if already claimed.
-  Response: { rfs_id }
-  Wire to: "claim & write this skill" button
-
-POST /api/rfs/[id]/submit-skill
-  Auth: required (must be claimant)
-  Body: { content } (markdown string)
-  Action: Insert skill, update rfs status to 'published'
-  Response: { skill_id }
-  Note: No review step for hackathon. Auto-publish on submit.
-
-GET /api/skills/[id]/content
-  Auth: none (agent-accessible)
-  MPP: mppx.charge({ amount: "0.005" })
-  Action:
-    1. If requester is a backer (contributed >= min amount): return content free
-    2. Otherwise: charge via MPP, insert purchase record, return content
-  Response: { content } (the full skill markdown)
-  Wire to: "buy for $0.005" button
-  Note: This is the agent-facing purchase endpoint. Agents discover via GET /api/skills.
-```
-
-### Agent-facing discovery (new API route)
-
-```
-GET /api/skills
-  Auth: none
-  Query params: ?status=open|funded|published  ?q=search_term
-  Response: JSON array of RFS objects (same shape as src/lib/types.ts RFS)
-  Purpose: Agents call this to discover available skills and open requests
-  Note: This replaces the decorative `curl oboe.sh/api/skills` on the landing page
-```
-
-## MPP integration
-
-`src/lib/mpp.ts` is already configured with Tempo on testnet. Use `mppx.charge()` for:
-
-1. **Fund endpoint** (`/api/rfs/[id]/fund`): variable amount from request body. `mppx.charge({ amount: body.amount.toString() })`.
-2. **Buy endpoint** (`/api/skills/[id]/content`): fixed amount. `mppx.charge({ amount: "0.005" })`.
-
-Pattern from existing code (`src/app/api/bid/route.ts`):
-```ts
-export const POST = mppx.charge({ amount: "0.01" })(() =>
-  Response.json({ accepted: true, timestamp: Date.now() })
-)
-```
-
-For variable amounts, you'll need to read the body first, then call charge. Check mppx docs for dynamic pricing.
-
-The existing `/api/bid/route.ts` is a demo endpoint. Delete it once the real endpoints are built.
-
-## Frontend wiring checklist
-
-Each item is a specific file change. No new pages needed -- all routes exist.
-
-```
-src/app/new/page.tsx
-  □ Add 'use client' (needs form state)
-  □ Add onChange handlers to inputs
-  □ Add onSubmit → POST /api/rfs
-  □ Redirect to /browse/{new_id} on success
-  □ Add error display for validation failures
-
-src/app/browse/page.tsx
-  □ Replace rfsList import with server-side DB query
-  □ Wire filter pills to ?status= query param (use searchParams)
-  □ Wire search input to ?q= query param
-  □ Add 'use client' for interactive filters, or use URL-based filtering (server component + searchParams)
-
-src/app/browse/[id]/page.tsx
-  □ Replace getRFSById/getContributionsForRFS/getSkillForRFS/getUserById with DB queries
-  □ Wire "fund this request" button → POST /api/rfs/[id]/fund
-  □ Wire "claim & write this skill" button → POST /api/rfs/[id]/claim
-  □ Wire "buy for $0.005" button → GET /api/skills/[id]/content (MPP flow)
-  □ Add client-side fund amount input (how much to contribute)
-  □ Show "funded" success state after payment
-
-src/app/page.tsx (landing)
-  □ Replace rfsList import with DB queries (open + recent published)
-
-src/app/me/page.tsx
-  □ Replace getCurrentUser() with BetterAuth session
-  □ Replace mock data queries with DB queries using session user id
-  □ Show sign-in prompt if not authenticated
-
-src/components/header.tsx
-  □ Add auth state (sign in / user name)
-  □ Conditionally show sign-in link vs. profile link
-```
-
-## What to delete when done
-
-- `src/lib/mock-data.ts` -- all mock data and helper functions
-- `src/app/api/bid/route.ts` -- demo endpoint
-- All imports of mock-data in page files
-
-Keep `src/lib/types.ts` and `src/lib/constants.ts`. The types should match your DB schema. The ASCII logo constant is used by the landing page.
-
-## Order of operations
-
-1. Database + schema setup
-2. BetterAuth integration (auth routes, session, sign-in UI)
-3. Read endpoints: wire pages to real DB queries (landing, browse, detail, profile)
-4. Write endpoints: /api/rfs (create), /api/rfs/[id]/fund, /api/rfs/[id]/claim
-5. MPP-gated endpoints: /api/skills/[id]/content (buy), /api/rfs/[id]/fund (pay)
-6. Agent discovery: GET /api/skills
-7. Delete mock-data.ts and demo bid route
+Do not point this schema at a policy-v2 production deployment without a reviewed data migration.

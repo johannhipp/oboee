@@ -1,78 +1,88 @@
-# Oboe Skill
+# Oboe agent guide
 
-Oboe is a micropayment-first marketplace for agent skills.
+Oboe is a testnet marketplace for crowdfunded agent skill files. Use the public API to discover RFSs and published skills, optionally fund an open request, and buy one published Markdown skill.
 
-Your job as an agent is to:
-1) discover open/published items,
-2) optionally fund open requests,
-3) buy and read published skill content.
+## Safety boundary
 
-Use only small MVP payment amounts (all below `$0.01`).
+The current service accepts only Tempo Moderato pathUSD:
+
+- chain ID: `42431`
+- token: `0x20c0000000000000000000000000000000000000`
+- payment method/intent: `tempo` / `charge`
+- amount: `1..9000` base units (always below `$0.01`)
+
+Before signing, confirm the 402 challenge matches all four facts and the recipient you intend to pay. Refuse mainnet, another token, a zero/unknown recipient, or a larger amount.
 
 ## Base URL
 
-- Production: `https://oboe.sh`
-- Local: `http://localhost:3000`
+- Hosted service: `https://oboe.sh`
+- Local default: `http://localhost:3000`
 
-## Payment Rule (MVP)
-
-- Keep every payment below `$0.01`.
-- Suggested defaults:
-  - fund amount: `$0.003`
-  - content purchase: `$0.005` (or route-capped max `$0.009`)
-
-## Agent-Facing Routes
-
-### 1) Discover catalog
-
-`GET /api/skills`
-
-Optional query params:
-- `status=open|funded|published`
-- `q=<search text>`
-
-Examples:
+## Discover public metadata
 
 ```bash
-curl "https://oboe.sh/api/skills?status=open"
-curl "https://oboe.sh/api/skills?status=published"
+curl --fail-with-body "https://oboe.sh/api/skills"
+curl --fail-with-body "https://oboe.sh/api/skills?status=open&q=tempo&tags=payments"
+curl --fail-with-body "https://oboe.sh/api/rfs/<rfs-id>"
+curl --fail-with-body "https://oboe.sh/api/skills/<skill-id>"
 ```
 
-### 2) Fund an open request (MPP paid)
+Filters are `status=open|funded|published`, `q`, `authorId`, and repeatable or comma-separated `tags`. Metadata responses never include `contentMarkdown`.
 
-`POST /api/rfs/:id/fund`
+## Fund an open RFS
 
-Body:
+The body amount is decimal pathUSD. From an Oboe repository checkout, use the guarded helper:
 
-```json
-{ "amount": "0.003" }
+```bash
+MPPX_ACCOUNT=<testnet-account> \
+OBOE_EXPECTED_ESCROW_ADDRESS=<verified-oboe-escrow> \
+./scripts/pay.sh \
+  POST https://oboe.sh/api/rfs/<rfs-id>/fund \
+  '{"amount":"0.001"}'
 ```
 
-Expected flow:
-- first response may be `402 Payment Required`
-- retry with an MPP-capable client to complete payment
-- success returns contribution metadata and updated state
+The unpaid request returns 402. The guarded script checks the recipient/network/token/amount, signs that exact challenge, and performs one authorized retry. A successful response names the contribution and the RFS's next state.
 
-### 3) Read paid skill content (MPP paid)
+If the repository helper is unavailable, first make the unpaid request and inspect its `WWW-Authenticate` header. Only after validating every safety fact above, sign that exact header and send one retry:
 
-`GET /api/skills/:id/content`
+```bash
+export MPPX_ACCOUNT=<testnet-account>
+export CHALLENGE='<exact validated WWW-Authenticate value>'
+AUTHORIZATION=$(npx --yes mppx sign \
+  --account "$MPPX_ACCOUNT" \
+  --rpc-url https://rpc.moderato.tempo.xyz \
+  --challenge "$CHALLENGE")
 
-Expected flow:
-- if no access: `402 Payment Required`
-- on paid retry: returns full `contentMarkdown`
+curl --fail-with-body -X POST \
+  https://oboe.sh/api/rfs/<rfs-id>/fund \
+  -H "Authorization: $AUTHORIZATION" \
+  -H 'Content-Type: application/json' \
+  --data '{"amount":"0.001"}'
+```
 
-## Happy-Path Procedure
+Never follow a second challenge automatically. A successful paid retry must include a `Payment-Receipt` header and an Oboe JSON result with `status: "ok"`.
 
-1. `GET /api/skills?status=open`
-2. pick an `rfsId`
-3. pay-fund via `POST /api/rfs/:id/fund` with `0.003`
-4. `GET /api/skills?status=published`
-5. pick a `skillId`
-6. pay-read via `GET /api/skills/:id/content`
+## Buy a published skill
 
-## Debug Checklist
+```bash
+MPPX_ACCOUNT=<testnet-account> \
+OBOE_EXPECTED_ESCROW_ADDRESS=<verified-oboe-escrow> \
+./scripts/pay.sh \
+  GET https://oboe.sh/api/skills/<skill-id>/content
+```
 
-- `401` should not block agent payment routes
-- `402` challenge appears before payment
-- paid retry returns `200`
-- all charged amounts remain `< $0.01`
+The listing price is fixed by the server. A successful paid response includes `contentMarkdown`, purchase metadata, and the receipt reference.
+
+Anonymous payment is supported and returns a one-shot copy in that response. Persistent account entitlement requires starting the 402 request while signed in and paying the exact bound challenge shown by Oboe. Do not copy browser session cookies into an agent.
+
+## Expected statuses
+
+- `200`: metadata, existing entitlement, or verified paid result
+- `400`: malformed payload or out-of-range amount
+- `401`: create, claim, submit, wallet, or another account-only action requires sign-in
+- `402`: valid MPP payment challenge
+- `404`: unknown/malformed public resource ID
+- `409`: invalid lifecycle state or conflicting replay
+- `503`: payment configuration is unavailable; do not retry with another network
+
+There are no API keys, delegated budgets, reviewer workflows, disputes, or mainnet payments in this MVP.

@@ -1,194 +1,73 @@
-# Oboe
+# Oboe marketplace MVP contract
 
-## The pitch
+This document is the acceptance boundary for the current product. A feature not listed under “In scope” is not required merely because it appeared in an earlier prototype or QA report.
 
-Agents are bad at security. They optimize for "it compiles" and move on. Generic skill files help, but a 200-line markdown about "auth best practices" won't teach an agent how to harden a GraphQL subscription layer against batching attacks. That knowledge lives in the heads of security researchers who have no reason to write it up for free.
+## Product thesis
 
-Oboe is a crowdfunded skills marketplace. Anyone can file a **Request for Skill (RFS)** describing expertise they need. Others chip in until the funding threshold is met. A researcher fulfills the RFS, delivers the skill, and gets paid. Backers get access. Everyone else buys it later for a fraction of a cent.
+Specialists can turn narrow expertise into agent-readable Markdown. Demand is proven before the work is written: someone publishes an RFS, others fund it, a writer fulfills it, and the result becomes a paid skill.
 
-## Core concept: Request for Skill (RFS)
+## In scope
 
-The RFS is the atomic unit of Oboe. Everything on the platform is either an open RFS collecting funds, or a published skill that started as one.
+### Public catalog
 
-Anyone can write an RFS. You don't need to be a "researcher" -- there are no role distinctions in the UI. The person who files an RFS might be the same person who fulfills a different one. Today you need a skill, tomorrow you write one. The platform doesn't care.
+- Browse one mixed catalog of open/funded RFSs and published skills.
+- Search by text and filter by status or tags.
+- Read public metadata, status, funding progress, prices, and summaries.
+- Keep full skill Markdown out of every public metadata response.
 
-An RFS has four states:
+### Authenticated author and writer flow
 
-| Status | What's happening |
-|---|---|
-| `open` | Accepting funds. Anyone can chip in. |
-| `funded` | Threshold met. Waiting for someone to claim and fulfill it. |
-| `fulfilled` | Skill delivered, under review. |
-| `published` | Live. Backers have access. Everyone else can buy it. |
+- Email/password sign-up and sign-in through Better Auth.
+- Create an RFS with title, description, scope, tags, threshold, and minimum contribution.
+- Claim a funded, unclaimed RFS; first valid claimant wins atomically.
+- Let only the claimant submit the skill.
+- Auto-publish on submit. There is no review state or reviewer role in this MVP.
+- Save one validated, nonzero EVM payout wallet per account.
 
-## How people use it
+### Payment and entitlement flow
 
-You sign up once (BetterAuth). From there you can do any combination of:
+- Fund an open RFS through an MPP `tempo` charge.
+- Transition `open -> funded` when accepted contributions reach the threshold.
+- Give the skill author and eligible backers account-based access after publication.
+- Sell a one-shot copy of published content to everyone else through MPP.
+- Record a signed-in principal in the challenge so a cookie-free CLI retry can grant account entitlement.
+- Make payment recording server-authorized, exact-amount, exact-token, and idempotent.
+- Return stable 400/401/402/403/404/409/503 error envelopes.
 
-- **Write an RFS** -- describe what you need, set a funding goal.
-- **Back an RFS** -- put money toward someone else's request.
-- **Claim a funded RFS** -- commit to writing the skill.
-- **Browse and buy** -- find published skills, pay sub-$0.01 per download.
+### Testnet boundary
 
-There's one unified feed. Published skills and open RFSs live side by side, filterable by status. No separate "researcher dashboard" or "buyer portal."
+- Network: Tempo Moderato, chain ID `42431`.
+- Currency: pathUSD at `0x20c0000000000000000000000000000000000000`.
+- Every funding and purchase charge is `1..9000` base units, below `$0.01`.
+- The application fails closed for any other network, token, missing recipient, or missing secret.
 
-## How agents use it
+### Payout accounting
 
-Agents hit the same data through JSON endpoints. The catalog is identical to what humans see in the browser.
+- Record creator earnings and the MVP 99/1 creator/platform split.
+- Display the accounting balance and saved wallet honestly.
+- Do not present an accounting status as an on-chain payout.
 
-**Discover**: `GET /api/skills` returns the full catalog -- published skills and open RFSs in one list. Filter by status, tags, or keyword. An agent looking for "Next.js middleware hardening" gets back both a published skill it can buy now and an open RFS it could back.
+## Lifecycle
 
-**Buy**: `GET /api/skills/[id]/content` is gated by MPP. Agent sends request, gets a 402 challenge, signs a sub-$0.01 payment, retries, gets the skill file. No API keys. No account creation. Just HTTP and a wallet.
-
-**Back**: `POST /api/rfs/[id]/fund` lets an agent chip in toward an open RFS. Same MPP flow, higher amount.
-
-**Check status**: `GET /api/rfs/[id]` returns the current state of any RFS. An agent that backed a request can poll this to know when the skill is ready.
-
-The point: agents shouldn't need a different protocol than humans. Same data, same payment flow, different rendering.
+| State | Allowed action | Next state |
+|---|---|---|
+| `open` | accepted funding | `open` or `funded` |
+| `funded` | one signed-in user claims | `funded` with claimant |
+| `funded` with claimant | claimant submits and auto-publishes | `published` |
+| `published` | entitled read or paid purchase | `published` |
 
 ## Access rules
 
-- **Backers** (contributed >= minimum amount to the RFS): access the skill at no extra cost once published.
-- **Everyone else**: buy any published skill for sub-$0.01 via MPP micropayment.
-- **Browsing is free**. Metadata, descriptions, and status are public. Only the skill file content is gated.
+- Metadata is always public.
+- Full content is returned only to the skill author, an account with an access grant, or the verified paid request that created a purchase.
+- A paid anonymous request receives content in that one response. Persistent account access requires a challenge bound to a signed-in user.
+- Payment recording treats a challenge ID as globally single-use across funding and purchase. Exact re-entry at the recording boundary returns the original result; changed payment facts return `409 IDEMPOTENCY_CONFLICT`.
 
-## What a "deep skill" actually looks like
+## Product surface
 
-A generic skill says "validate user input." A deep skill from Oboe walks an agent through:
+Pages: `/`, `/browse`, `/browse/[id]`, `/new`, `/me`, `/sign-in`, and `/docs`.
 
-- Which validation library to use for this specific framework version, and why the obvious choice is wrong.
-- What the actual attack surface looks like, with concrete exploit examples.
-- Where the framework's own defenses fall short.
-- Code patterns the agent should generate, and patterns it should refuse to generate.
-- How to verify the fix works -- not "write tests" but specific assertions against specific attack vectors.
-
-The researcher's domain expertise is the product. The skill file is the delivery format.
-
----
-
-## Technical details
-
-### Payment rails
-
-All payments go through the Machine Payments Protocol (MPP). MPP uses HTTP 402 challenges with Tempo stablecoins (pathUSD/USDC). The `mppx` SDK handles challenge, sign, verify on both server and client. Agents and humans pay the same way: HTTP request, 402 response, signed payment, retry. No API keys, no subscriptions.
-
-Sub-cent transactions are the whole reason MPP exists. Stripe takes $0.30 minimum per transaction -- that kills any model where a skill costs $0.005. MPP on Tempo settles in milliseconds for near-zero fees.
-
-### Tech stack
-
-| Layer | Choice |
-|---|---|
-| Framework | Next.js 16 (App Router) |
-| Auth | BetterAuth |
-| Payments | mppx 0.4.7 (Tempo stablecoins) |
-| Frontend | React 19, Tailwind CSS 4 |
-| Language | TypeScript 5 |
-
-### Data model
-
-**User** -- signs up via BetterAuth. Has a wallet address. Can file RFSs, back RFSs, claim funded RFSs, and buy published skills. No role column -- behavior determines what you are.
-
-**RFS** -- title, description, scope, funding threshold, current amount, status (`open` | `funded` | `fulfilled` | `published`), author (user who filed it), claimant (user who claimed it, nullable).
-
-**RFS tags** -- short keyword tags used for catalog filtering (`auth`, `nextjs`, `graphql`, etc).
-
-**Contribution** -- links a user to an RFS with an amount. Tracked to determine backer access.
-
-**Skill** -- the delivered content. Linked 1:1 to a fulfilled/published RFS. Markdown body, metadata.
-
-**Skill tags** -- inherited from RFS and optionally extended on submit.
-
-**Purchase** -- a sub-$0.01 MPP transaction from a non-backer to access a published skill.
-
-### Routes
-
-```
-Pages
-/                           Landing
-/browse                     Unified feed (published skills + open RFSs)
-/browse/[id]                RFS detail -- fund, claim, or buy depending on status
-/new                        Write a new RFS
-/me                         Your RFSs, contributions, purchased skills
-
-API (human + agent)
-/api/auth/*                 BetterAuth
-/api/skills                 GET: catalog (filterable by status, search)
-/api/skills/[id]            GET: RFS/skill detail
-/api/skills/[id]/content    GET: skill file (MPP-gated, sub-$0.01)
-/api/rfs                    POST: create new RFS
-/api/rfs/[id]               GET: RFS status + funding progress
-/api/rfs/[id]/fund          POST: contribute toward threshold (MPP-gated)
-/api/rfs/[id]/claim         POST: researcher claims a funded RFS
-/api/rfs/[id]/submit        POST: claimant submits skill content
-/api/rfs/[id]/payout/claim  POST: claimant claims payout after publish
-/api/me/wallet              POST: link or update payout wallet
-```
-
-### Non-goals (hackathon scope)
-
-- Dispute resolution or refunds.
-- Reputation or rating system.
-- Skill versioning.
-- Mobile-optimized UI.
-- Mainnet deployment (testnet for now, mainnet later).
-
-## Locked backend decisions (v1)
-
-These are explicit implementation decisions for backend and agent-facing APIs.
-
-1. **Database + backend runtime**: Convex.
-2. **Auth**: BetterAuth via `@convex-dev/better-auth` (Convex component integration).
-3. **Funding custody**: all `/fund` payments go to a platform escrow wallet first.
-4. **Payout timing**: researcher payout is claimable only after publish approval.
-5. **Review workflow**: auto-publish on researcher submit in v1, but payout still requires publish state.
-6. **Backer unlock rule**: backers unlock free access if they contributed at least the minimum contribution.
-7. **Minimum contribution**: no practical minimum beyond positive payment; enforce `>= 1` base unit.
-8. **Purchase pricing**: researcher sets fixed per-skill `purchasePriceBaseUnits` for non-backers.
-9. **MPP strategy**:
-- `/api/rfs/[id]/fund`: one-time `charge` intent in v1.
-- `/api/skills/[id]/content`: one-time `charge` intent for non-entitled callers.
-- session-based MPP is deferred to post-hackathon.
-10. **Agent protocol contract**: authenticated endpoints return `401` before `402`; payment challenges only for authenticated callers.
-11. **Payout fee model**: payout is `99%` to researcher, `1%` platform fee.
-12. **Content entitlement**: if caller already has `AccessGrant`, return content without requiring another payment.
-13. **Funding amount input**: `/fund` uses caller-provided amount per request (validated server-side).
-14. **Claim model**: open bounty claim; any authenticated user can claim a funded RFS and first atomic claim wins.
-15. **Purchase revenue model**: non-backer purchases also split `99%` researcher / `1%` platform fee.
-16. **Wallet lifecycle**: users can sign up without a wallet; payout claim requires a linked payout wallet address.
-
-## Backend domain model refinement
-
-### Additional entities
-
-- **AccessGrant**
-  - `userId`, `skillId`, `source` (`backer_unlock` | `purchase` | `admin`), timestamps
-- **PayoutLedger**
-  - `rfsId`, `researcherUserId`, `grossAmountBaseUnits`, `platformFeeBaseUnits`, `netAmountBaseUnits`, `status` (`locked` | `claimable` | `claimed`), `receiptReference`, timestamps
-- **PaymentEvent**
-  - normalized payment audit row for contributions/purchases/payout claims:
-  - `type`, `resourceId`, `challengeId`, `receiptReference`, `amountBaseUnits`, `currencyAddress`, `status`, timestamps
-
-### RFS state machine refinement
-
-- `open` -> `funded` when `currentAmount >= threshold`
-- `funded` -> `fulfilled` when claimant submits skill content
-- `fulfilled` -> `published` immediately in v1 (auto-publish)
-- `published` is terminal in v1
-- `cancelled` reserved for admin/manual cancellation
-
-### Invariants
-
-1. Contribution records are append-only.
-2. `currentAmount` equals accepted contribution sum.
-3. An RFS can have at most one published skill.
-4. A user can access skill content only with an `AccessGrant`.
-5. A `challengeId` is single-use (replay-protected).
-6. Payout claim requires ledger row in `claimable` state.
-7. Payout claim is idempotent and can only succeed once per claimable balance version.
-
-## API contract refinement (backend + agent-facing)
-
-### Existing/kept routes
+API routes:
 
 - `GET /api/skills`
 - `GET /api/skills/[id]`
@@ -197,39 +76,27 @@ These are explicit implementation decisions for backend and agent-facing APIs.
 - `GET /api/rfs/[id]`
 - `POST /api/rfs/[id]/fund`
 - `POST /api/rfs/[id]/claim`
-
-### Additional backend routes required for v1
-
 - `POST /api/rfs/[id]/submit`
-  - claimant submits skill content and metadata
-  - transitions RFS to `fulfilled` then `published`
-- `POST /api/rfs/[id]/payout/claim`
-  - researcher claims payout after publish
-  - records payout receipt and marks payout ledger as `claimed`
 - `POST /api/me/wallet`
-  - user links or updates payout wallet address
+- `/api/auth/*`
 
-### MPP endpoint behavior
+## Explicitly out of scope
 
-For `/fund` and paid `/content` flows:
+- API keys, delegated authority, delegated budgets, credential recovery, or wallet recovery
+- applicant queues, application scoring, reviewer assignment, review bonds, or slashing
+- moderation, evidence bundles, automated evaluation, quality scoring, or approval gates
+- reputation, rankings, ratings, version history, update guarantees, or trust badges
+- disputes, refunds, appeals, arbitration, or legal/compliance workflows
+- admin consoles, operations dashboards, production observability programs, or policy migrations
+- automated on-chain payout settlement or payout claims
+- mainnet payment acceptance
 
-1. Validate auth first (`401` if unauthenticated).
-2. If payment is required and missing, return `402` challenge.
-3. On credential retry, verify payment and apply state change atomically.
-4. Persist `challengeId` + receipt reference to prevent replay.
-5. Return deterministic JSON for agents: `status`, `resourceId`, `accessGranted`, `nextState`.
-6. Validate payment currency matches expected token address.
+These may become separate, evidence-driven product proposals. They are not hidden MVP requirements.
 
-## Convex + BetterAuth implementation constraints
+## Release criteria
 
-1. Use `convex >= 1.25.0`.
-2. Pin `better-auth` to the version required by `@convex-dev/better-auth` (currently `1.5.3`).
-3. Register BetterAuth routes in Convex HTTP router; Next auth route is only a proxy.
-4. Run BetterAuth server API operations inside Convex functions, not arbitrary Next server code.
-
-## Deferred (post-hackathon)
-
-- Session intent for recurring funding/purchase channels.
-- Mainnet settlement.
-- Moderation scoring/review queues.
-- Refund/dispute workflows.
+1. Unit tests cover capabilities, payment validation, replay handling, seed boundaries, serialization, and money formatting.
+2. Typecheck, lint, and production build pass.
+3. Browser E2E covers public discovery, auth, wallet persistence, RFS creation, and the 402 handoff.
+4. At least one real Moderato funding payment and one real Moderato purchase are independently verified by transaction receipt.
+5. Desktop and mobile dogfood find no unresolved critical or high issue in the core flow.
