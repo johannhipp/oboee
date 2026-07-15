@@ -62,11 +62,11 @@ export default async function OpsPage() {
         Privileged commands require a recent passkey and are audit logged. API
         keys are rejected.
       </p>
-      <div className="mt-6 flex flex-wrap gap-2">
+      <div className="mt-6 flex flex-wrap gap-x-4 gap-y-2 border-y border-border py-3">
         {context.roles.map((item) => (
           <span
             key={item.role}
-            className="border border-border px-2 py-1 font-mono text-xs"
+            className="font-mono text-xs"
           >
             {item.role}
             {item.tags.length ? `: ${item.tags.join(",")}` : ""}
@@ -75,7 +75,7 @@ export default async function OpsPage() {
       </div>
       {overview ? (
         <>
-          <dl className="mt-8 grid gap-px bg-border sm:grid-cols-3">
+          <dl className="mt-8 grid divide-y divide-border border-y border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             {[
               ["active roles", overview.activeRoleCount],
               ["pending recoveries", overview.pendingRecoveryCount],
@@ -84,14 +84,14 @@ export default async function OpsPage() {
               ["migration findings", overview.migrationFindingCount],
               ["open disputes", overview.openDisputeCount],
             ].map(([label, value]) => (
-              <div key={label} className="bg-background p-4">
+              <div key={label} className="py-4 sm:px-4">
                 <dt className="text-xs text-muted-foreground">{label}</dt>
                 <dd className="mt-1 text-xl font-medium">{value}</dd>
               </div>
             ))}
           </dl>
           {overview.alerts.length ? (
-            <section className="mt-8 border-2 border-red-700 p-4" role="alert">
+            <section className="mt-8 border-y border-red-700 py-4" role="alert">
               <h2 className="font-medium text-red-800">Operational alerts</h2>
               <div className="mt-2 divide-y divide-red-200">
                 {overview.alerts.map((alert) => (

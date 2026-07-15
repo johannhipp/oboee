@@ -16,6 +16,7 @@ import type * as auth from "../auth.js";
 import type * as contributions from "../contributions.js";
 import type * as crons from "../crons.js";
 import type * as delegations from "../delegations.js";
+import type * as devFixtures from "../devFixtures.js";
 import type * as evaluationV2 from "../evaluationV2.js";
 import type * as evaluations from "../evaluations.js";
 import type * as evidence from "../evidence.js";
@@ -77,6 +78,7 @@ declare const fullApi: ApiFromModules<{
   contributions: typeof contributions;
   crons: typeof crons;
   delegations: typeof delegations;
+  devFixtures: typeof devFixtures;
   evaluationV2: typeof evaluationV2;
   evaluations: typeof evaluations;
   evidence: typeof evidence;

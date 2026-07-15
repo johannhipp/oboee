@@ -189,7 +189,16 @@ export const catalog = query({
     const sorted = rows.filter((row) => row.quarantineState === "clear" && (tags.size === 0 || row.tags.some((tag) => tags.has(tag)))).sort((left, right) => right.totalBps - left.totalBps || String(left.skillId).localeCompare(String(right.skillId)));
     const start = args.cursor ? Math.max(0, sorted.findIndex((row) => String(row._id) === args.cursor) + 1) : 0;
     const page = sorted.slice(start, start + Math.min(100, Math.max(1, args.limit ?? 20)));
-    return { items: page, nextCursor: start + page.length < sorted.length ? String(page.at(-1)?._id) : null };
+    const items = await Promise.all(page.map(async (row) => {
+      const skill = await ctx.db.get(row.skillId);
+      const rfs = skill ? await ctx.db.get(skill.rfsId) : null;
+      return {
+        ...row,
+        title: rfs?.title ?? skill?.summary ?? row.category,
+        summary: skill?.summary,
+      };
+    }));
+    return { items, nextCursor: start + page.length < sorted.length ? String(page.at(-1)?._id) : null };
   },
 });
 

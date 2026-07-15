@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { anyApi } from "convex/server";
 import { fetchQuery } from "convex/nextjs";
 
@@ -7,12 +8,55 @@ import { CopyBox } from "@/components/copy-box";
 import { DataToast } from "@/components/data-fallback";
 import { RfsFundingAction, SkillPurchaseAction } from "@/components/payment-action";
 import { StatusBadge } from "@/components/status-badge";
+import { TechnicalDetails } from "@/components/technical-details";
 import { convexUnavailableMessage } from "@/lib/auth-server";
 import { rfsCapabilities, skillCapabilities } from "@/lib/api-v2/capabilities";
 import { resourceHandoff } from "@/lib/handoff";
 import { buildPublicRfsReadModel, buildPublicSkillReadModel } from "@/lib/read-models/public";
 
 export const dynamic = "force-dynamic";
+
+const numberFormat = new Intl.NumberFormat("en-US");
+
+const formatUnits = (value?: string | null) => {
+  if (value === undefined || value === null) return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? `${numberFormat.format(number)} units` : `${value} units`;
+};
+
+const formatDate = (value?: string | null) => value
+  ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
+  : undefined;
+
+const formatLabel = (value: string) => value.replaceAll("_", " ");
+const formatEvidenceLabel = (value: string) => value === "public" ? "Public evidence" : value === "restricted" ? "Private evidence" : formatLabel(value);
+
+const StateLabel = ({ value }: { value: string }) => (
+  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+    {formatLabel(value)}
+  </span>
+);
+
+const SectionHeading = ({ title, description }: { title: string; description?: string }) => (
+  <div className="mb-4 border-b border-border pb-3">
+    <h2 className="text-base font-medium">{title}</h2>
+    {description ? <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p> : null}
+  </div>
+);
+
+const Metric = ({ label, value }: { label: string; value: ReactNode }) => (
+  <div className="border-b border-border py-3 sm:border-b-0 sm:border-r sm:pr-4 last:border-0 last:pr-0">
+    <dt className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+    <dd className="mt-1 text-sm">{value}</dd>
+  </div>
+);
+
+const Definition = ({ label, value }: { label: string; value?: ReactNode }) => value === undefined || value === null ? null : (
+  <div className="grid gap-1 border-b border-border py-2 last:border-b-0 sm:grid-cols-[11rem_1fr]">
+    <dt className="font-mono text-xs text-muted-foreground">{label}</dt>
+    <dd className="min-w-0 break-words text-sm">{value}</dd>
+  </div>
+);
 
 const loadResource = async (id: string) => {
   try {
@@ -36,82 +80,170 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const title = resource ? (resource.kind === "rfs" ? resource.data.rfs.title : resource.data.title) : "Marketplace item";
   return { title: `${title} | Oboe`, alternates: { canonical: `/browse/${id}` } };
 }
-
-const Definition = ({ label, value }: { label: string; value?: React.ReactNode }) => value === undefined || value === null ? null : (
-  <div className="grid gap-1 border-b border-border py-2 sm:grid-cols-[11rem_1fr]">
-    <dt className="font-mono text-xs text-muted-foreground">{label}</dt><dd className="min-w-0 break-words text-sm">{value}</dd>
-  </div>
-);
-
 export default async function MarketplaceDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const resource = await loadResource(id);
-  if (!resource) return <div className="mx-auto max-w-4xl py-10"><DataToast message={convexUnavailableMessage()} /><p className="mt-8 text-sm text-muted-foreground">This policy-v2 resource is unavailable or does not exist.</p></div>;
+  if (!resource) {
+    return <main className="mx-auto max-w-5xl py-10"><DataToast message={convexUnavailableMessage()} /><p className="mt-8 text-sm text-muted-foreground">This marketplace item is unavailable or does not exist.</p></main>;
+  }
 
   if (resource.kind === "skill") {
     const skill = resource.data;
     const purchase = skillCapabilities(skill.id, skill.versionId, skill.quarantineState === "clear", !skill.legacyImported).find((item) => item.action === "purchase" && item.allowed);
+
     return (
-      <article className="mx-auto max-w-4xl py-8">
-        {skill.legacyImported ? <div role="status" className="mb-5 border border-amber-700 bg-amber-50 p-4 text-sm text-amber-950"><strong className="block font-mono uppercase">Imported policy-v1 content</strong>This historical record is read-only until a policy-v2 version is published.</div> : null}
-        {skill.quarantineState !== "clear" ? <div role="alert" className="mb-5 border-2 border-red-700 bg-red-50 p-4 text-sm text-red-900"><strong className="block font-mono uppercase">{skill.quarantineState}</strong>This version must not be purchased or executed until the hold is resolved.</div> : null}
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
-          <div>
-            <div className="flex flex-wrap items-center gap-3"><span className="font-mono text-xs uppercase text-muted-foreground">skill v{skill.version}</span><StatusBadge status={skill.status} /></div>
-            <h1 className="mt-2 text-2xl font-medium">{skill.title}</h1>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">{skill.summary}</p>
-            <dl className="mt-6">
-              <Definition label="author" value={<Link href={`/authors/${skill.authorHandle}`} className="underline">@{skill.authorHandle}</Link>} />
-              <Definition label="policy" value={`v${skill.policyVersion}`} />
-              <Definition label="content digest" value={<code>{skill.digestAlgorithm}:{skill.contentHash}</code>} />
-              <Definition label="price" value={`${skill.purchasePriceBaseUnits} base units`} />
-              <Definition label="verified installs" value={skill.uniqueVerifiedInstalls} />
-              <Definition label="quality" value={skill.quality ? `${skill.quality.adjustedScore.toFixed(3)} · ${skill.quality.confidence} · ${skill.quality.independentCount} independent` : "provisional · no finalized evidence"} />
-              <Definition label="published" value={skill.publishedAt ? new Date(skill.publishedAt).toLocaleString() : "pending"} />
+      <main className="mx-auto max-w-5xl py-8 sm:py-10">
+        <Link href="/browse" className="font-mono text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground">← Marketplace</Link>
+        {skill.legacyImported ? <div role="status" className="mt-6 border border-amber-700 bg-amber-50 p-4 text-sm text-amber-950"><strong className="block font-mono uppercase">Imported policy-v1 content</strong>This historical record is read-only until a policy-v2 version is published.</div> : null}
+        {skill.quarantineState !== "clear" ? <div role="alert" className="mt-6 border-y border-red-700 py-3 text-sm text-red-900"><strong className="mr-2 font-mono uppercase">{formatLabel(skill.quarantineState)}</strong>This version is not ready to purchase or execute until the hold is resolved.</div> : null}
+        <div className="mt-6 grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
+          <article className="min-w-0">
+            <header className="border-b border-border pb-6">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">Published skill · v{skill.version}</span>
+                <StatusBadge status={skill.status} />
+              </div>
+              <h1 className="mt-3 break-words text-2xl font-medium tracking-tight sm:text-3xl">{skill.title}</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">{skill.summary}</p>
+              <div className="mt-4 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">
+                {skill.tags.map((tag) => <span key={tag}>#{tag}</span>)}
+              </div>
+            </header>
+
+            <dl className="grid gap-3 border-b border-border py-5 sm:grid-cols-3 sm:gap-4">
+              <Metric label="Author" value={<Link href={`/authors/${skill.authorHandle}`} className="underline underline-offset-4">@{skill.authorHandle}</Link>} />
+              <Metric label="Quality" value={skill.quality ? `${skill.quality.adjustedScore.toFixed(1)} / 5 · ${skill.quality.confidence}` : "No finalized signal yet"} />
+              <Metric label="Verified installs" value={skill.uniqueVerifiedInstalls} />
             </dl>
-            <h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Public post-use reviews</h2>
-            {skill.reviews.map((review) => <div key={review.reviewId} className="border-b border-border py-4"><div className="flex justify-between gap-3 font-mono text-xs"><Link href={`/reviews/${review.reviewId}`} className="underline">{review.rating}/5 · {review.outcome}</Link><span>{review.state}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{review.text}</p></div>)}
-            {skill.reviews.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No public reviews yet.</p> : null}
-          </div>
-          <aside><h2 className="mb-2 font-mono text-xs uppercase text-muted-foreground">Use with an agent</h2><CopyBox text={resourceHandoff({ kind: "skill", id: skill.id, versionId: skill.versionId })} />{purchase ? <SkillPurchaseAction capability={purchase} skillVersionId={skill.versionId} /> : <p className="mt-4 text-sm text-muted-foreground">Purchases are unavailable for imported policy-v1 content.</p>}<Link href={`/browse/${skill.rfsId}`} className="mt-4 inline-block font-mono text-xs underline">source RFS</Link></aside>
+
+            <section className="mt-8" aria-labelledby="reviews-heading">
+              <SectionHeading title="Post-use reviews" description="Public reviews for this published version." />
+              <div>
+                {skill.reviews.map((review) => <article key={review.reviewId} className="border-b border-border py-4 first:pt-0"><div className="flex flex-wrap items-center justify-between gap-2"><Link href={`/reviews/${review.reviewId}`} className="font-medium underline underline-offset-4">{review.rating}/5 · {review.outcome}</Link><StateLabel value={review.state} /></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{review.text}</p><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">{review.tags.map((tag) => <span key={tag}>#{tag}</span>)}<time>{formatDate(review.createdAt)}</time></div></article>)}
+                {skill.reviews.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No public reviews yet.</p> : null}
+              </div>
+            </section>
+
+            <TechnicalDetails summary="Technical details" hint="Version, digest, and API data" className="mt-8">
+              <dl>
+                <Definition label="exact version ID" value={<code className="break-all">{skill.versionId}</code>} />
+                <Definition label="content digest" value={<code className="break-all">{skill.digestAlgorithm ?? "sha256"}:{skill.contentHash}</code>} />
+                <Definition label="purchase price" value={formatUnits(skill.purchasePriceBaseUnits)} />
+                <Definition label="published" value={formatDate(skill.publishedAt) ?? "pending"} />
+                <Definition label="resource ID" value={<code className="break-all">{skill.id}</code>} />
+              </dl>
+            </TechnicalDetails>
+          </article>
+
+          <aside className="min-w-0 lg:sticky lg:top-24 lg:self-start">
+            <div className="border-y border-border py-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Published version</p>
+              <h2 className="mt-2 text-base font-medium">Purchase this version</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">The purchase refers to the exact published version identified below.</p>
+              <p className="mt-4 font-mono text-xs text-muted-foreground">price · {formatUnits(skill.purchasePriceBaseUnits)}</p>
+              {purchase ? <SkillPurchaseAction capability={purchase} skillVersionId={skill.versionId} /> : <p className="mt-4 text-sm text-muted-foreground">Purchases are unavailable for imported policy-v1 content.</p>}
+              <Link href={`/browse/${skill.rfsId}`} className="mt-4 inline-block font-mono text-xs underline underline-offset-4">Open source request</Link>
+            </div>
+            <TechnicalDetails summary="Machine reference" hint="Version and capabilities" className="mt-6">
+              <p className="mb-3 text-sm leading-6 text-muted-foreground">The reference includes the exact version and its available capabilities.</p>
+              <CopyBox label="Copy skill handoff" text={resourceHandoff({ kind: "skill", id: skill.id, versionId: skill.versionId })} />
+            </TechnicalDetails>
+          </aside>
         </div>
-      </article>
+      </main>
     );
   }
 
   const detail = resource.data;
   const rfs = detail.rfs;
-  const fund = rfsCapabilities(rfs.id, rfs.status).find((item) => item.action === "fund")!;
+  const fund = rfsCapabilities(rfs.id, rfs.status).find((item) => item.action === "fund");
+  if (!fund) return <main className="mx-auto max-w-5xl py-10 text-sm text-muted-foreground">Funding details are unavailable.</main>;
+  const target = Number(rfs.totalFundingTargetBaseUnits ?? "0");
+  const funded = Number(rfs.fundedBaseUnits);
+  const fundingPercent = target > 0 && Number.isFinite(funded) ? Math.min(100, Math.round((funded / target) * 100)) : 0;
+
   return (
-    <article className="mx-auto max-w-4xl py-8">
-      {detail.submission && detail.submission.quarantineState !== "clear" ? <div role="alert" className="mb-5 border-2 border-red-700 bg-red-50 p-4 text-sm text-red-900"><strong className="block font-mono uppercase">Submission {detail.submission.quarantineState}</strong>Publication, purchase, and payout remain held pending independent resolution.</div> : null}
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <div>
-          <div className="flex flex-wrap items-center gap-3"><span className="font-mono text-xs uppercase text-muted-foreground">RFS · policy {rfs.policyVersion}</span><StatusBadge status={rfs.status} /></div>
-          <h1 className="mt-2 text-2xl font-medium">{rfs.title}</h1>
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{rfs.description}</p>
-          <h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Contract</h2>
-          <dl>
-            <Definition label="requester" value={<Link href={`/authors/${rfs.authorHandle}`} className="underline">@{rfs.authorHandle}</Link>} />
-            <Definition label="scope" value={rfs.scope} />
-            <Definition label="environments" value={detail.revision?.targetEnvironments.join(", ")} />
-            <Definition label="work escrow" value={`${rfs.workEscrowBaseUnits ?? "0"} base units`} />
-            <Definition label="review reserve" value={`${rfs.reviewReserveBaseUnits ?? "0"} base units`} />
-            <Definition label="funded / target" value={`${rfs.fundedBaseUnits} / ${rfs.totalFundingTargetBaseUnits ?? "0"} base units`} />
-            <Definition label="contract digest" value={<code>{rfs.contractDigest ?? "draft"}</code>} />
-            <Definition label="funding deadline" value={rfs.fundingDeadline ? new Date(rfs.fundingDeadline).toLocaleString() : undefined} />
-            <Definition label="application deadline" value={rfs.applicationDeadline ? new Date(rfs.applicationDeadline).toLocaleString() : undefined} />
-            <Definition label="delivery deadline" value={rfs.deliveryDeadline ? new Date(rfs.deliveryDeadline).toLocaleString() : undefined} />
-          </dl>
-          <h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Acceptance criteria</h2>
-          <div className="overflow-x-auto"><table className="w-full min-w-[40rem] text-left text-sm"><thead className="font-mono text-xs text-muted-foreground"><tr><th className="py-2">criterion</th><th>pass condition</th><th>verification</th><th className="text-right">weight</th></tr></thead><tbody>{detail.criteria.map((criterion) => <tr key={criterion.criterionId} className="border-t border-border align-top"><td className="py-3 pr-4"><div className="font-medium">{criterion.title}</div>{criterion.requiredForPublication ? <span className="font-mono text-[10px] text-red-700">required</span> : null}</td><td className="py-3 pr-4">{criterion.passCondition}</td><td className="py-3 pr-4">{criterion.verificationMethod}</td><td className="py-3 text-right font-mono">{(criterion.weightBps / 100).toFixed(2)}%</td></tr>)}</tbody></table></div>
-          {detail.assessment ? <><h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Assessment</h2><dl><Definition label="workflow" value={detail.assessment.workflowStatus} /><Definition label="decision" value={detail.assessment.decisionKind ?? detail.assessment.status} /><Definition label="passed weight" value={detail.assessment.passedWeightBps === undefined ? undefined : `${(detail.assessment.passedWeightBps / 100).toFixed(2)}%`} /><Definition label="reason" value={detail.assessment.assessmentReason} /></dl></> : null}
-          <h2 className="mt-8 border-b border-border pb-2 text-base font-medium">Public evidence</h2>
-          {detail.publicEvidence.map((artifact) => <div key={artifact.artifactId} className="border-b border-border py-3 text-sm"><div className="flex flex-wrap justify-between gap-2 font-mono text-xs"><span>{artifact.verificationState} · {artifact.scanState} · {artifact.classification}</span><span>{artifact.mimeType} · {artifact.sizeBytes} bytes</span></div><p className="mt-2">{artifact.publicRedaction ?? "No public narrative supplied."}</p></div>)}
-          {detail.publicEvidence.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No public evidence submitted.</p> : null}
-        </div>
-        <aside><h2 className="mb-2 font-mono text-xs uppercase text-muted-foreground">Send to agent</h2><CopyBox text={resourceHandoff({ kind: "rfs", id: rfs.id })} /><RfsFundingAction capability={fund} minimumBaseUnits="1" />{detail.submission ? <Link className="mt-4 inline-block font-mono text-xs underline" href={`/browse/${detail.submission.skillId}`}>published skill</Link> : null}</aside>
+    <main className="mx-auto max-w-5xl py-8 sm:py-10">
+      <Link href="/browse" className="font-mono text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground">← Marketplace</Link>
+      {detail.submission && detail.submission.quarantineState !== "clear" ? <div role="alert" className="mt-6 border-y border-red-700 py-3 text-sm text-red-900"><strong className="mr-2 font-mono uppercase">Submission {formatLabel(detail.submission.quarantineState)}</strong>Publication, purchase, and payout remain held pending independent resolution.</div> : null}
+      <div className="mt-6 grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
+        <article className="min-w-0">
+          <header className="border-b border-border pb-6">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">Request for work</span>
+              <StatusBadge status={rfs.status} />
+            </div>
+            <h1 className="mt-3 break-words text-2xl font-medium tracking-tight sm:text-3xl">{rfs.title}</h1>
+            <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{rfs.description}</p>
+            <div className="mt-4 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">
+              {rfs.tags.map((tag) => <span key={tag}>#{tag}</span>)}
+            </div>
+            <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground">
+              <span>requested by <Link href={`/authors/${rfs.authorHandle}`} className="text-foreground underline underline-offset-4">@{rfs.authorHandle}</Link></span>
+              {rfs.selectedAuthorHandle ? <span>working with <Link href={`/authors/${rfs.selectedAuthorHandle}`} className="text-foreground underline underline-offset-4">@{rfs.selectedAuthorHandle}</Link></span> : null}
+            </div>
+          </header>
+
+          <section className="mt-8" aria-labelledby="funding-heading">
+            <SectionHeading title="Funding" description="Current amount, target, and progress." />
+            <dl className="grid gap-3 border-y border-border py-4 sm:grid-cols-3 sm:gap-4">
+              <Metric label="Raised" value={formatUnits(rfs.fundedBaseUnits) ?? "0 units"} />
+              <Metric label="Target" value={formatUnits(rfs.totalFundingTargetBaseUnits) ?? "Not set"} />
+              <Metric label="Progress" value={`${fundingPercent}%`} />
+            </dl>
+            <div className="mt-3 h-1.5 w-full bg-gray-100" role="progressbar" aria-label="Funding progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={fundingPercent}>
+              <div className="h-full bg-foreground" style={{ width: `${fundingPercent}%` }} />
+            </div>
+          </section>
+
+          <section className="mt-8" aria-labelledby="criteria-heading">
+            <SectionHeading title="Acceptance criteria" description="Conditions used to determine whether the result is accepted." />
+            <div className="divide-y divide-border border-y border-border">
+              {detail.criteria.map((criterion) => <article key={criterion.criterionId} className="py-5"><div className="flex flex-wrap items-start justify-between gap-3"><h3 className="font-medium">{criterion.title}</h3>{criterion.requiredForPublication ? <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-red-700">required</span> : null}</div><p className="mt-2 text-sm leading-6">{criterion.passCondition}</p><TechnicalDetails summary="Verification detail" hint="Method and weight" className="mt-3"><dl><Definition label="method" value={criterion.verificationMethod} /><Definition label="weight" value={`${(criterion.weightBps / 100).toFixed(2)}%`} /><Definition label="fixture version" value={criterion.fixtureVersionId ? <code className="break-all">{criterion.fixtureVersionId}</code> : undefined} /></dl></TechnicalDetails></article>)}
+              {detail.criteria.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No acceptance criteria have been published.</p> : null}
+            </div>
+          </section>
+
+          {detail.assessment ? <section className="mt-8" aria-labelledby="assessment-heading"><SectionHeading title="Current assessment" description="Latest evaluation state and reason." /><div className="border-y border-border py-4"><div className="flex flex-wrap items-center justify-between gap-3"><StateLabel value={detail.assessment.decisionKind ?? detail.assessment.status} />{detail.assessment.passedWeightBps !== undefined ? <span className="font-mono text-xs text-muted-foreground">{(detail.assessment.passedWeightBps / 100).toFixed(0)}% criteria passed</span> : null}</div><p className="mt-3 text-sm leading-6">{detail.assessment.assessmentReason}</p></div><TechnicalDetails summary="Assessment details" hint="Workflow and timestamps" className="mt-4"><dl><Definition label="workflow" value={detail.assessment.workflowStatus ? formatLabel(detail.assessment.workflowStatus) : undefined} /><Definition label="decided" value={formatDate(detail.assessment.decidedAt)} /></dl></TechnicalDetails></section> : null}
+
+          <section className="mt-8" aria-labelledby="evidence-heading">
+            <SectionHeading title="Public evidence" description="Evidence available without authenticated access." />
+            <div className="divide-y divide-border border-y border-border">
+              {detail.publicEvidence.map((artifact) => <article key={artifact.artifactId} className="py-5"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium">{formatEvidenceLabel(artifact.classification)}</h3><StateLabel value={artifact.verificationState} /></div><p className="mt-2 text-sm leading-6">{artifact.publicRedaction ?? "No public narrative supplied."}</p><TechnicalDetails summary="Evidence metadata" hint="File and scan state" className="mt-3"><dl><Definition label="scan" value={formatLabel(artifact.scanState)} /><Definition label="file" value={`${artifact.mimeType} · ${numberFormat.format(artifact.sizeBytes)} bytes`} /><Definition label="artifact ID" value={<code className="break-all">{artifact.artifactId}</code>} /></dl></TechnicalDetails></article>)}
+              {detail.publicEvidence.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No public evidence submitted.</p> : null}
+            </div>
+          </section>
+
+          <TechnicalDetails summary="Technical details" hint="Policy, deadlines, and IDs" className="mt-8">
+            <dl>
+              <Definition label="policy version" value={rfs.policyVersion} />
+              <Definition label="scope" value={rfs.scope} />
+              <Definition label="target environments" value={detail.revision?.targetEnvironments.join(", ")} />
+              <Definition label="work escrow" value={formatUnits(rfs.workEscrowBaseUnits)} />
+              <Definition label="review reserve" value={formatUnits(rfs.reviewReserveBaseUnits)} />
+              <Definition label="contract digest" value={rfs.contractDigest ? <code className="break-all">{rfs.contractDigest}</code> : "draft"} />
+              <Definition label="funding deadline" value={formatDate(rfs.fundingDeadline)} />
+              <Definition label="application deadline" value={formatDate(rfs.applicationDeadline)} />
+              <Definition label="delivery deadline" value={formatDate(rfs.deliveryDeadline)} />
+              <Definition label="request ID" value={<code className="break-all">{rfs.id}</code>} />
+            </dl>
+          </TechnicalDetails>
+        </article>
+
+        <aside className="min-w-0 lg:sticky lg:top-24 lg:self-start">
+          <div className="border-y border-border py-5">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Funding</p>
+            <h2 className="mt-2 text-base font-medium">{fund.allowed ? "Fund this request" : "Funding is closed"}</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{fund.allowed ? "Contribute in the request token and network." : "The funding window has closed."}</p>
+            {fund.allowed ? <RfsFundingAction capability={fund} minimumBaseUnits="1" /> : null}
+            {detail.submission ? <Link className="mt-4 inline-block font-mono text-xs underline underline-offset-4" href={`/browse/${detail.submission.skillId}`}>Open published skill</Link> : null}
+          </div>
+          <TechnicalDetails summary="Machine reference" hint="Resource and capabilities" className="mt-6">
+            <p className="mb-3 text-sm leading-6 text-muted-foreground">Copy the request locator when a client needs the full contract.</p>
+            <CopyBox label="Copy request handoff" text={resourceHandoff({ kind: "rfs", id: rfs.id })} />
+          </TechnicalDetails>
+        </aside>
       </div>
-    </article>
+    </main>
   );
 }

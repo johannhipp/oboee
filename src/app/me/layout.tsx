@@ -2,7 +2,7 @@ import Link from "next/link";
 
 const links = [
   ["/me", "work"], ["/me/activity", "activity"], ["/me/actions", "actions"], ["/me/agents", "agents"],
-  ["/me/wallets", "wallets"], ["/me/earnings", "earnings"], ["/me/reputation", "reputation"],
+  ["/me/wallets", "wallets"], ["/me/security", "security"], ["/me/earnings", "earnings"], ["/me/reputation", "reputation"],
 ] as const;
 
 export default function MeLayout({ children }: { children: React.ReactNode }) {

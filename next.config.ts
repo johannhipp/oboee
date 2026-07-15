@@ -5,6 +5,7 @@ import type { NextConfig } from "next";
 const repoRoot = dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
+  distDir: process.env.OBOE_DEV_FIXTURE === "true" ? ".next-fixtures" : ".next",
   turbopack: {
     root: repoRoot,
   },

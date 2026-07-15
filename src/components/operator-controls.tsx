@@ -20,6 +20,9 @@ const post = async (href: string, body: unknown) => {
     throw new Error(payload.message ?? payload.code ?? "Command failed.");
 };
 
+const inputClass = "border-0 border-b border-border bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground";
+const buttonClass = "w-fit border-b border-foreground pb-1 font-mono text-xs disabled:opacity-60";
+
 export function OperatorAction({
   href,
   label,
@@ -42,7 +45,7 @@ export function OperatorAction({
       <button
         type="button"
         disabled={busy || Boolean(expectedDigest && !confirmed)}
-        className={`border border-border px-3 py-2 font-mono text-xs ${dangerous ? "text-red-700" : ""}`}
+        className={`${buttonClass} ${dangerous ? "text-red-700" : ""}`}
         onClick={async () => {
           setBusy(true);
           setMessage(null);
@@ -116,11 +119,11 @@ export function ReasonAction({
         value={reason}
         onChange={(event) => setReason(event.target.value)}
         placeholder="reason"
-        className="min-w-52 border border-border bg-background px-3 py-2 text-xs"
+        className="min-w-52 border-0 border-b border-border bg-transparent px-0 py-2 text-xs outline-none focus:border-foreground"
       />
       <button
         disabled={busy}
-        className={`border border-border px-3 py-2 font-mono text-xs ${dangerous ? "text-red-700" : ""}`}
+        className={`${buttonClass} ${dangerous ? "text-red-700" : ""}`}
       >
         {busy ? "working..." : label}
       </button>
@@ -168,14 +171,14 @@ export function RoleGrantForm() {
         <input
           required
           name="principalId"
-          className="mt-1 w-full border border-border bg-background px-3 py-2"
+          className={`mt-1 w-full ${inputClass}`}
         />
       </label>
       <label className="text-sm">
         Role
         <select
           name="role"
-          className="mt-1 w-full border border-border bg-background px-3 py-2"
+          className={`mt-1 w-full ${inputClass}`}
         >
           <option value="trusted_reviewer">trusted reviewer</option>
           <option value="security_adjudicator">security adjudicator</option>
@@ -188,7 +191,7 @@ export function RoleGrantForm() {
         <input
           name="tags"
           placeholder="security,nextjs"
-          className="mt-1 w-full border border-border bg-background px-3 py-2"
+          className={`mt-1 w-full ${inputClass}`}
         />
       </label>
       <label className="text-sm">
@@ -197,7 +200,7 @@ export function RoleGrantForm() {
           required
           name="activeUntil"
           type="datetime-local"
-          className="mt-1 w-full border border-border bg-background px-3 py-2"
+          className={`mt-1 w-full ${inputClass}`}
         />
       </label>
       <label className="text-sm md:col-span-2">
@@ -205,10 +208,10 @@ export function RoleGrantForm() {
         <input
           required
           name="reason"
-          className="mt-1 w-full border border-border bg-background px-3 py-2"
+          className={`mt-1 w-full ${inputClass}`}
         />
       </label>
-      <button className="w-fit bg-foreground px-4 py-2 font-mono text-sm text-background">
+      <button className="w-fit border-b border-foreground pb-1 font-mono text-sm">
         grant role
       </button>
       {message ? (
@@ -268,9 +271,10 @@ export function FeatureFlagForm({
         </p>
       </div>
       <select
+        aria-label={`Mode for ${flagKey}`}
         name="mode"
         defaultValue={currentMode}
-        className="border border-border bg-background px-2 py-1 text-sm"
+        className="border-0 border-b border-border bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground"
       >
         <option>off</option>
         <option>shadow</option>
@@ -281,16 +285,16 @@ export function FeatureFlagForm({
         <input
           name="cohorts"
           placeholder="cohort IDs, comma separated"
-          className="border border-border bg-background px-2 py-1 text-sm"
+          className="border-0 border-b border-border bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground"
         />
         <input
           required
           name="reason"
           placeholder="reason"
-          className="border border-border bg-background px-2 py-1 text-sm"
+          className="border-0 border-b border-border bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground"
         />
       </div>
-      <button className="border border-border px-3 py-2 font-mono text-xs">
+      <button className={buttonClass}>
         update
       </button>
       {message ? (

@@ -1,11 +1,14 @@
 import { Mppx, tempo } from "mppx/nextjs";
+import { createClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { tempo as tempoChain } from "viem/chains";
 
 const RECIPIENT_ADDRESS = process.env.MPP_RECIPIENT_ESCROW_ADDRESS;
 const CURRENCY_ADDRESS = process.env.MPP_FUNDING_TOKEN_ADDRESS;
 const FEE_PAYER_PRIVATE_KEY = process.env.MPP_FEE_PAYER_PRIVATE_KEY;
 const ENABLE_FEE_PAYER = process.env.MPP_ENABLE_FEE_PAYER === "true";
 const SECRET_KEY = process.env.MPP_SECRET_KEY;
+const RPC_URL = process.env.OBOE_MPP_RPC_URL?.trim();
 const hexAddressPattern = /^0x[a-fA-F0-9]{40}$/;
 const hexPrivateKeyPattern = /^0x[a-fA-F0-9]{64}$/;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -55,6 +58,9 @@ const createMppx = () => {
     hexPrivateKeyPattern.test(FEE_PAYER_PRIVATE_KEY)
       ? privateKeyToAccount(FEE_PAYER_PRIVATE_KEY as `0x${string}`)
       : undefined;
+  const verificationClient = RPC_URL
+    ? createClient({ chain: tempoChain, transport: http(RPC_URL) })
+    : undefined;
 
   return Mppx.create({
     secretKey: SECRET_KEY,
@@ -62,6 +68,7 @@ const createMppx = () => {
       tempo.charge({
         currency: currencyAddress,
         recipient: recipientAddress,
+        ...(verificationClient ? { getClient: () => verificationClient } : {}),
         ...(feePayerAccount ? { feePayer: feePayerAccount } : {}),
       }),
     ],

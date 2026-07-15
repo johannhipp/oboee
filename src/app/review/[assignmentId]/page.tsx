@@ -86,8 +86,8 @@ export default async function AssignmentPage({
           </dd>
         </div>
       </dl>
-      <aside className="mb-6 border-l-2 border-amber-600 pl-3 text-sm text-muted-foreground">
-        Bond consequence preview: ordinary criterion failure changes the payout multiplier; confirmed abandonment can slash 50% of the author bond, and adjudicated harmful or fraudulent work can slash 100%. A trusted reviewer records facts but cannot settle or slash funds directly.
+      <aside className="mb-6 border-l-2 border-border pl-3 text-sm leading-6 text-muted-foreground">
+        Settlement consequences: ordinary criterion failure changes the payout multiplier; confirmed abandonment can slash 50% of the author bond, and adjudicated harmful or fraudulent work can slash 100%. A reviewer records facts but does not settle or slash funds directly.
       </aside>
       <ReviewerWorkspace
         assignmentId={assignmentId}

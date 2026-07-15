@@ -12,7 +12,7 @@ export function RFSRow({ rfs, rank }: RFSRowProps) {
   return (
     <Link
       href={`/browse/${rfs.id}`}
-      className="flex items-center gap-4 px-3 py-2.5 hover:bg-gray-50 transition-colors duration-150 rounded-md overflow-hidden min-w-0"
+      className="flex min-w-0 items-center gap-4 border-b border-border py-3 transition-colors duration-150 hover:text-muted-foreground"
     >
       {rank !== undefined && (
         <span className="w-6 text-right font-mono text-sm text-muted-foreground tabular-nums">

@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalAction, internalMutation, query, type MutationCtx } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, query, type MutationCtx } from "./_generated/server";
 import { allocateLargestRemainder, calculateSettlementPools } from "./lib/money";
 import { baseUnits, basisPoints, POLICY_V2 } from "./lib/policy";
 import { requirePrincipal } from "./lib/principals";
@@ -171,6 +171,70 @@ export const preparePendingTransfers = internalMutation({
   },
 });
 
+type TransferWorkItem = {
+  transferId: Id<"settlementTransfers">;
+  state: "pending" | "broadcast" | "failed";
+  idempotencyKey: string;
+  network: string;
+  tokenAddress: string;
+  senderAddress: string;
+  recipientAddress: string;
+  amountBaseUnits: bigint;
+};
+
+export const dueSettlementTransfers = internalQuery({
+  args: { now: v.optional(v.number()), limit: v.optional(v.number()) },
+  returns: v.any(),
+  handler: async (ctx, args): Promise<TransferWorkItem[]> => {
+    const now = args.now ?? Date.now();
+    const limit = Math.min(100, Math.max(1, args.limit ?? 25));
+    const [pending, broadcast, failed] = await Promise.all([
+      ctx.db.query("settlementTransfers").withIndex("by_state_and_nextAttemptAt", (query) => query.eq("state", "pending")).take(limit),
+      ctx.db.query("settlementTransfers").withIndex("by_state_and_nextAttemptAt", (query) => query.eq("state", "broadcast")).take(limit),
+      ctx.db.query("settlementTransfers").withIndex("by_state_and_nextAttemptAt", (query) => query.eq("state", "failed")).take(limit),
+    ]);
+    return [...pending, ...broadcast, ...failed]
+      .filter((transfer) => transfer.nextAttemptAt === undefined || transfer.nextAttemptAt <= now)
+      .sort((left, right) => left.createdAt - right.createdAt || String(left._id).localeCompare(String(right._id)))
+      .slice(0, limit)
+      .flatMap((transfer): TransferWorkItem[] => {
+        if (transfer.state !== "pending" && transfer.state !== "broadcast" && transfer.state !== "failed") return [];
+        return [{
+          transferId: transfer._id,
+          state: transfer.state,
+          idempotencyKey: transfer.idempotencyKey,
+          network: transfer.network,
+          tokenAddress: transfer.tokenAddress,
+          senderAddress: transfer.senderAddress,
+          recipientAddress: transfer.recipientAddress,
+          amountBaseUnits: transfer.amountBaseUnits,
+        }];
+      });
+  },
+});
+
+export const recordTransferFailure = internalMutation({
+  args: { transferId: v.id("settlementTransfers"), errorCode: v.string(), now: v.optional(v.number()) },
+  returns: v.object({ state: v.string(), nextAttemptAt: v.optional(v.number()) }),
+  handler: async (ctx, args) => {
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer || transfer.state === "confirmed" || transfer.state === "cancelled") {
+      return { state: transfer?.state ?? "missing", nextAttemptAt: transfer?.nextAttemptAt };
+    }
+    const now = args.now ?? Date.now();
+    const attempts = transfer.attempts + 1;
+    const delayMs = Math.min(15 * 60 * 1_000, 15_000 * 2 ** Math.min(6, attempts - 1));
+    const nextAttemptAt = now + delayMs;
+    await ctx.db.patch(transfer._id, {
+      state: "failed",
+      attempts,
+      errorCode: args.errorCode.slice(0, 80),
+      nextAttemptAt,
+    });
+    return { state: "failed", nextAttemptAt };
+  },
+});
+
 const transferResultValidator = v.object({ transferId: v.id("settlementTransfers"), state: v.string() });
 
 export const recordBroadcast = internalMutation({
@@ -194,10 +258,11 @@ export const confirmTransferReceipt = internalMutation({
     if (!transfer) throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     if (transfer.state === "confirmed") return { transferId: transfer._id, state: "confirmed" };
     const minimumConfirmations = Number(process.env.OBOE_SETTLEMENT_CONFIRMATIONS ?? "1");
-    const matches = args.success && args.confirmations >= minimumConfirmations && transfer.network === args.network && transfer.tokenAddress.toLowerCase() === args.tokenAddress.toLowerCase() && transfer.senderAddress.toLowerCase() === args.senderAddress.toLowerCase() && transfer.recipientAddress.toLowerCase() === args.recipientAddress.toLowerCase() && transfer.amountBaseUnits === args.amountBaseUnits && transfer.transactionHash === args.transactionHash;
+    const transactionMatches = transfer.transactionHash === undefined || transfer.transactionHash === args.transactionHash;
+    const matches = args.success && args.confirmations >= minimumConfirmations && transfer.network === args.network && transfer.tokenAddress.toLowerCase() === args.tokenAddress.toLowerCase() && transfer.senderAddress.toLowerCase() === args.senderAddress.toLowerCase() && transfer.recipientAddress.toLowerCase() === args.recipientAddress.toLowerCase() && transfer.amountBaseUnits === args.amountBaseUnits && transactionMatches;
     if (!matches) throw new ConvexError({ code: "INVALID_SETTLEMENT_RECEIPT", message: "Custody receipt does not match the immutable transfer." });
     const now = Date.now();
-    await ctx.db.patch(transfer._id, { state: "confirmed", verifiedReceiptJson: args.receiptJson, confirmedAt: now });
+    await ctx.db.patch(transfer._id, { state: "confirmed", transactionHash: args.transactionHash, verifiedReceiptJson: args.receiptJson, confirmedAt: now });
     await ctx.db.patch(transfer.obligationId, { state: "settled", settledAt: now });
     return { transferId: transfer._id, state: "confirmed" };
   },
@@ -205,6 +270,11 @@ export const confirmTransferReceipt = internalMutation({
 
 const broadcastRef = makeFunctionReference<"mutation", { transferId: Id<"settlementTransfers">; custodyNonce: string; transactionHash: string }, { transferId: Id<"settlementTransfers">; state: string }>("settlements:recordBroadcast");
 const confirmRef = makeFunctionReference<"mutation", { transferId: Id<"settlementTransfers">; receiptJson: string; network: string; tokenAddress: string; senderAddress: string; recipientAddress: string; amountBaseUnits: bigint; transactionHash: string; confirmations: number; success: boolean }, { transferId: Id<"settlementTransfers">; state: string }>("settlements:confirmTransferReceipt");
+const prepareRef = makeFunctionReference<"mutation", { limit?: number }, Id<"settlementTransfers">[]>("settlements:preparePendingTransfers");
+const dueTransfersRef = makeFunctionReference<"query", { now?: number; limit?: number }, TransferWorkItem[]>("settlements:dueSettlementTransfers");
+const broadcastTransferRef = makeFunctionReference<"action", { transferId: Id<"settlementTransfers">; transfer: Omit<TransferWorkItem, "transferId" | "state"> }, { transferId: Id<"settlementTransfers">; state: string }>("settlements:broadcastTransfer");
+const reconcileTransferRef = makeFunctionReference<"action", { transferId: Id<"settlementTransfers">; idempotencyKey: string }, { transferId: Id<"settlementTransfers">; state: string }>("settlements:reconcileTransfer");
+const failureRef = makeFunctionReference<"mutation", { transferId: Id<"settlementTransfers">; errorCode: string; now?: number }, { state: string; nextAttemptAt?: number }>("settlements:recordTransferFailure");
 
 const custodyConfig = () => {
   const url = process.env.OBOE_CUSTODY_URL?.replace(/\/$/, "");
@@ -236,6 +306,54 @@ export const reconcileTransfer = internalAction({
     const receipt = await response.json() as Record<string, unknown>;
     if (typeof receipt.network !== "string" || typeof receipt.tokenAddress !== "string" || typeof receipt.senderAddress !== "string" || typeof receipt.recipientAddress !== "string" || typeof receipt.amountBaseUnits !== "string" || typeof receipt.transactionHash !== "string" || typeof receipt.confirmations !== "number" || typeof receipt.success !== "boolean" || !/^\d+$/.test(receipt.amountBaseUnits)) throw new Error("Custody receipt is incomplete.");
     return await ctx.runMutation(confirmRef, { transferId: args.transferId, receiptJson: JSON.stringify(receipt), network: receipt.network, tokenAddress: receipt.tokenAddress, senderAddress: receipt.senderAddress, recipientAddress: receipt.recipientAddress, amountBaseUnits: BigInt(receipt.amountBaseUnits), transactionHash: receipt.transactionHash, confirmations: receipt.confirmations, success: receipt.success });
+  },
+});
+
+export const processSettlementOutbox = internalAction({
+  args: { now: v.optional(v.number()), limit: v.optional(v.number()) },
+  returns: v.object({ prepared: v.number(), processed: v.number(), confirmed: v.number(), failed: v.number() }),
+  handler: async (ctx, args) => {
+    const now = args.now ?? Date.now();
+    const limit = Math.min(100, Math.max(1, args.limit ?? 25));
+    const prepared = await ctx.runMutation(prepareRef, { limit });
+    const transfers = await ctx.runQuery(dueTransfersRef, { now, limit });
+    let confirmed = 0;
+    let failed = 0;
+    for (const item of transfers) {
+      try {
+        if (item.state === "pending" || item.state === "failed") {
+          try {
+            await ctx.runAction(broadcastTransferRef, {
+              transferId: item.transferId,
+              transfer: {
+                idempotencyKey: item.idempotencyKey,
+                network: item.network,
+                tokenAddress: item.tokenAddress,
+                senderAddress: item.senderAddress,
+                recipientAddress: item.recipientAddress,
+                amountBaseUnits: item.amountBaseUnits,
+              },
+            });
+          } catch {
+            // A timeout or lost response can still mean the provider accepted
+            // the immutable idempotency key, so reconcile before recording failure.
+          }
+        }
+        const result = await ctx.runAction(reconcileTransferRef, {
+          transferId: item.transferId,
+          idempotencyKey: item.idempotencyKey,
+        });
+        if (result.state === "confirmed") confirmed += 1;
+      } catch (error) {
+        failed += 1;
+        await ctx.runMutation(failureRef, {
+          transferId: item.transferId,
+          errorCode: error instanceof Error ? error.message : "provider_or_receipt_unavailable",
+          now,
+        });
+      }
+    }
+    return { prepared: prepared.length, processed: transfers.length, confirmed, failed };
   },
 });
 

@@ -1,4 +1,5 @@
-import { getAddress, isHex, keccak256, toBytes, verifyMessage } from "viem";
+import { secp256k1 } from "@noble/curves/secp256k1";
+import { getAddress, hashMessage, hexToBytes, isHex, keccak256, toBytes } from "viem";
 import { createSiweMessage } from "viem/siwe";
 
 export const normalizeEvmAddress = (address: string) => getAddress(address.trim());
@@ -34,9 +35,19 @@ export const verifyWalletSignature = async (args: {
   if (!isHex(args.signature)) {
     return false;
   }
-  return await verifyMessage({
-    address: normalizeEvmAddress(args.address),
-    message: args.message,
-    signature: args.signature,
-  });
+  try {
+    const bytes = hexToBytes(args.signature);
+    if (bytes.length !== 65) return false;
+    const recovery = bytes[64] >= 27 ? bytes[64] - 27 : bytes[64];
+    if (recovery !== 0 && recovery !== 1) return false;
+    const publicKey = secp256k1.Signature
+      .fromCompact(bytes.slice(0, 64))
+      .addRecoveryBit(recovery)
+      .recoverPublicKey(hexToBytes(hashMessage(args.message)))
+      .toRawBytes(false);
+    const recovered = getAddress(`0x${keccak256(publicKey.slice(1)).slice(-40)}`);
+    return recovered === normalizeEvmAddress(args.address);
+  } catch {
+    return false;
+  }
 };

@@ -147,7 +147,9 @@ export const uploadEvidence = (rfsId: string) => v2ParsedCommand({
       signingKeyId: input.signingKeyId,
     };
     const envelopeSignature = signServerEnvelope(envelopeSecret(), evidenceFinalizePayload(finalize));
-    const artifactId = await fetchPrincipalMutation(anyApi.evidence.finalizeUpload, { ...finalize, envelopeSignature }, authentication);
+    const finalizeArgs = { ...finalize };
+    Reflect.deleteProperty(finalizeArgs, "principalId");
+    const artifactId = await fetchPrincipalMutation(anyApi.evidence.finalizeUpload, { ...finalizeArgs, envelopeSignature }, authentication);
     const result = { data: { artifactId }, capabilities: [], links: { evidence: `/api/v2/rfs/${rfsId}/evidence`, download: `/api/v2/evidence/${String(artifactId)}/download` } };
     return {
       response: v2Success({ requestId, data: result.data, status: 201, links: result.links }),

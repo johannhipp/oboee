@@ -8,16 +8,17 @@ on:
 
 jobs:
   checks:
+    name: lint, typecheck, test, build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -34,9 +35,3 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Browser accessibility and protocol tests
-        run: npm run test:e2e

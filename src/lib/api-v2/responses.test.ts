@@ -16,5 +16,11 @@ describe("v2 error status mapping", () => {
 
   it("keeps the existing fallback for unknown codes", () => {
     expect(statusForCode("unexpected_failure")).toBe(400);
+    expect(statusForCode("unauthorized")).toBe(401);
+    expect(statusForCode("reviewer_ineligible")).toBe(403);
+    expect(statusForCode("not_found")).toBe(404);
+    expect(statusForCode("stale_resource")).toBe(409);
+    expect(statusForCode("configuration_error")).toBe(503);
+    expect(statusForCode("rate_limited")).toBe(429);
   });
 });

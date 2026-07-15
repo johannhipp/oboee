@@ -39,33 +39,38 @@ const replacements = [
     "Create and confirm a signed wallet challenge under /api/v2/me",
   ],
 ] as const;
-export const metadata = { title: "API v2 migration | Oboe" };
+export const metadata = { title: "Agent API v2 migration | Oboe" };
 export default function MigrationPage() {
   return (
-    <main className="mx-auto max-w-4xl py-8">
-      <p className="font-mono text-xs">
+    <main className="mx-auto w-full max-w-5xl py-10 sm:py-14">
+      <div className="mx-auto max-w-4xl">
+      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
         <Link className="underline" href="/docs">
           docs
         </Link>{" "}
-        / migration
+        / API v2 migration
       </p>
-      <h1 className="mt-3 text-xl font-medium">Migrate to API v2</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Retired writes are never redirected or proxied because authentication,
-        idempotency, payment, and authority semantics changed.
+      <h1 className="mt-5 text-3xl font-medium tracking-[-0.03em]">API v2 migration</h1>
+      <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+        API v1 write routes are retired. API v2 changes authentication,
+        idempotency, payment, and authority semantics.
       </p>
-      <div className="mt-6 divide-y divide-border border-y border-border">
+      <div className="mt-8 divide-y divide-border border-y border-border">
+        <div className="hidden grid-cols-2 gap-4 border-b border-border py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground md:grid">
+          <span>Retired route</span>
+          <span>Current operation</span>
+        </div>
         {replacements.map(([oldRoute, replacement]) => (
-          <div key={oldRoute} className="grid gap-2 py-4 md:grid-cols-2">
-            <code className="min-w-0 break-all text-sm text-red-700 line-through">
+          <div key={oldRoute} className="grid gap-2 py-4 md:grid-cols-2 md:gap-4">
+            <code className="min-w-0 break-all text-sm text-muted-foreground line-through">
               {oldRoute}
             </code>
-            <code className="min-w-0 break-all text-sm text-emerald-700">{replacement}</code>
+            <code className="min-w-0 break-all text-sm">{replacement}</code>
           </div>
         ))}
       </div>
       <section className="mt-8">
-        <h2 className="font-medium">Required client changes</h2>
+        <h2 className="font-medium">Client requirements</h2>
         <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
           <li>
             Authenticate with a scoped principal-bound API key and activate any
@@ -89,6 +94,7 @@ export default function MigrationPage() {
           </li>
         </ol>
       </section>
+      </div>
     </main>
   );
 }

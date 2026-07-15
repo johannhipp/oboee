@@ -18,9 +18,9 @@ export default async function NewRequestPage() {
         <DataToast message={convexUnavailableMessage()} />
         <AsciiBox title="new request">
           <div className="space-y-4">
-            <div className="h-4 w-2/3 rounded-sm bg-gray-100" />
-            <div className="h-24 w-full rounded-md bg-gray-100" />
-            <div className="h-10 w-full rounded-md bg-gray-100" />
+            <div className="h-4 w-2/3 border-b border-border" />
+            <div className="h-24 w-full border-y border-border" />
+            <div className="h-10 w-full border-b border-border" />
             <p className="font-mono text-xs text-muted-foreground">
               Request creation needs auth and Convex writes, so the form is unavailable until the backend is configured.
             </p>

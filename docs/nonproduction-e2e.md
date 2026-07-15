@@ -2,8 +2,13 @@
 
 ## Preconditions
 
-- Use an isolated Convex deployment and testnet/fake MPP, KMS, scanner, signer,
-  and custody services. Production URLs, secrets, wallets, and funds are banned.
+- `npm run test:e2e` provisions an anonymous local Convex backend when needed
+  and starts in-memory fake MPP RPC, KMS, scanner, and custody services. It never
+  uses a production deployment, provider URL, wallet, secret, or funds.
+- The bootstrap mutation requires both `OBOE_ENVIRONMENT=nonproduction` and
+  `OBOE_NONPRODUCTION_BOOTSTRAP_ENABLED=true`; the runner sets these only on the
+  isolated local backend. It can create a named cohort but cannot enable the
+  policy globally.
 - Create separate principals for requester, backer, fulfiller, two evaluator
   clusters, trusted reviewer, adjudicator, and two security operators.
 - Bootstrap roles only through the documented nonproduction bootstrap mutation.
@@ -45,6 +50,18 @@ npm run build
 npm run test:e2e
 git diff --check
 ```
+
+Use Playwright arguments after `--` for a focused local rerun, for example:
+
+```bash
+npm run test:e2e -- e2e/provider-workflow.spec.ts --project=desktop
+```
+
+The provider workflow creates fresh principals, registers a virtual WebAuthn
+passkey, follows the same public API described by `public/SKILL.md`, and invokes
+internal lifecycle workers only where production uses a scheduler. Fake custody
+accepts one transfer while returning a lost response; the test must reconcile
+that transfer by its immutable idempotency key without broadcasting it twice.
 
 Record deployment ID, fake-provider versions, policy/algorithm versions, cohort,
 test principal IDs, obligation/transfer totals, and failing request IDs. Delete

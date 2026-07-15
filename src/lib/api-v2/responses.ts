@@ -38,12 +38,13 @@ export const v2Error = (args: {
   status: number;
   retryable?: boolean;
   fieldErrors?: Record<string, string[]>;
+  requiredPermission?: string;
   retryAfterSeconds?: number;
   links?: Record<string, string>;
 }) => {
   const headers = baseHeaders(args.requestId);
   if (args.retryAfterSeconds) headers.set("retry-after", String(args.retryAfterSeconds));
-  const payload = errorEnvelopeSchema.parse({ apiVersion: "v2", requestId: args.requestId, code: args.code, message: args.message, fieldErrors: args.fieldErrors, retryable: args.retryable ?? false, retryAfterSeconds: args.retryAfterSeconds, links: { openapi: "/api/v2/openapi.json", ...(args.links ?? {}) } });
+  const payload = errorEnvelopeSchema.parse({ apiVersion: "v2", requestId: args.requestId, code: args.code, message: args.message, fieldErrors: args.fieldErrors, requiredPermission: args.requiredPermission, retryable: args.retryable ?? false, retryAfterSeconds: args.retryAfterSeconds, links: { openapi: "/api/v2/openapi.json", ...(args.links ?? {}) } });
   return Response.json(payload, { status: args.status, headers });
 };
 

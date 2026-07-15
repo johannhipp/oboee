@@ -31,6 +31,40 @@ Configure a nonproduction Convex deployment before exercising authenticated
 flows. Money writes default off. Never use production custody or mainnet funds
 for the automated suites.
 
+### Seeded frontend mode
+
+To inspect realistic public and authenticated screens locally, run:
+
+```bash
+npm run dev:fixtures
+```
+
+Use `npm run seed:fixtures` when you only need to refresh the data without
+leaving the fixture app running.
+
+The fixture runner creates seven local Better Auth personas, seeds an idempotent
+Convex graph with requests, skills, reviews, evidence, wallets, payouts,
+settlements, recovery, migration, and operator records, and writes the route
+IDs to the ignored `.dev/oboe-fixture.json` manifest. The fixture server uses
+`http://localhost:3110` so it can run alongside the normal app.
+
+Run the complete browser matrix—including anonymous boundaries and every
+authenticated persona—with:
+
+```bash
+npm run test:e2e:seeded
+```
+
+Fixture writes are guarded by `OBOE_ENVIRONMENT=nonproduction` and
+`OBOE_NONPRODUCTION_BOOTSTRAP_ENABLED=true`; the seed functions are internal
+Convex functions and are not available to the browser.
+
+## Commit messages
+
+This project uses [Conventional Commits 1.0.0](COMMIT_CONVENTIONS.md). The
+standard applies to human contributors and AI agents alike, so agents should
+use it for every commit, including documentation-only changes.
+
 ## Verification
 
 ```bash

@@ -59,7 +59,7 @@ export default async function PaymentsPage() {
               <p className="font-mono text-xs break-all">
                 {item.network}:{item.tokenAddress}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 break-all text-xs text-muted-foreground">
                 {item.state} · {item.sourceType}:{item.sourceId} ·{" "}
                 {item.decisionReference}
               </p>

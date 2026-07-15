@@ -206,6 +206,24 @@ export const registerApiKeyAuthorization = mutation({
   },
 });
 
+export const hasApiKeyPermission = query({
+  args: { permission: marketplacePermissionValidator },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const principal = await requirePrincipal(ctx);
+    const authorization = await ctx.db
+      .query("apiKeyAuthorizations")
+      .withIndex("by_apiKeyId", (query) => query.eq("apiKeyId", principal.sessionId))
+      .unique();
+    return Boolean(
+      authorization &&
+      authorization.principalId === principal.principalId &&
+      authorization.revokedAt === undefined &&
+      authorization.permissions.includes(args.permission),
+    );
+  },
+});
+
 export const registerPrivilegedSession = mutation({
   args: { authenticatedAt: v.number(), envelopeSignature: v.string() },
   returns: v.id("privilegedSessionAttestations"),
