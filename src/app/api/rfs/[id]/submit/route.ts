@@ -1,10 +1,8 @@
 import { api } from "../../../../../../convex/_generated/api";
-import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { fetchAuthMutation, isAuthenticated } from "@/lib/auth-server";
+import { isMvpPaymentBaseUnits } from "@/lib/tempo";
 
 import { errorResponse, errorResponseFrom, okWriteResponse } from "../../../_lib/responses";
-
-const MAX_TEST_AMOUNT_BASE_UNITS = BigInt(9_000);
 
 const parseBaseUnits = (value: unknown): bigint | null => {
   if (typeof value === "bigint") {
@@ -45,10 +43,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (purchasePriceBaseUnits === null) {
       return errorResponse("INVALID_ARGUMENT", "purchasePriceBaseUnits must be an integer string.", 400);
     }
-    if (purchasePriceBaseUnits > MAX_TEST_AMOUNT_BASE_UNITS) {
+    if (!isMvpPaymentBaseUnits(purchasePriceBaseUnits)) {
       return errorResponse(
         "INVALID_ARGUMENT",
-        "For MVP testing, purchasePriceBaseUnits must be below $0.01.",
+        "For MVP testing, purchasePriceBaseUnits must be 1..9000 base units.",
         400,
       );
     }
@@ -56,7 +54,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const { id } = await context.params;
 
     const result = await fetchAuthMutation(api.rfs.submit, {
-      rfsId: id as Id<"rfs">,
+      rfsId: id,
       contentMarkdown: body.contentMarkdown,
       summary: body.summary,
       tags: body.tags,

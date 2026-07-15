@@ -2,18 +2,13 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
-
-const skillDocValidator = v.object({
-  _id: v.id("skills"),
-  _creationTime: v.number(),
-  rfsId: v.id("rfs"),
-  authorUserId: v.string(),
-  contentMarkdown: v.string(),
-  summary: v.string(),
-  tags: v.array(v.string()),
-  purchasePriceBaseUnits: v.int64(),
-  status: v.union(v.literal("draft"), v.literal("submitted"), v.literal("published")),
-});
+import {
+  assertPaymentEventCompatible,
+  assertPaymentServerSecret,
+  paymentIdempotencyConflict,
+  resolvePaymentPrincipal,
+} from "./lib/paymentBoundary";
+import { skillMetadataValidator, toSkillMetadata } from "./lib/skillMetadata";
 
 const computeFeeSplit = (grossAmountBaseUnits: bigint) => {
   const platformFeeBaseUnits = grossAmountBaseUnits / BigInt(100);
@@ -23,22 +18,87 @@ const computeFeeSplit = (grossAmountBaseUnits: bigint) => {
 
 export const recordPurchase = mutation({
   args: {
-    skillId: v.id("skills"),
+    skillId: v.string(),
     amountBaseUnits: v.int64(),
     currencyAddress: v.string(),
     challengeId: v.string(),
     receiptReference: v.string(),
+    principalUserId: v.optional(v.string()),
+    serverSecret: v.string(),
   },
   returns: v.object({
     purchaseId: v.id("purchases"),
     accessGranted: v.boolean(),
     buyerUserId: v.string(),
+    contentMarkdown: v.string(),
   }),
   handler: async (ctx, args) => {
+    assertPaymentServerSecret(args.serverSecret);
     const user = await authComponent.safeGetAuthUser(ctx);
-    const buyerUserId = user?._id ?? `agent:${args.challengeId.slice(0, 18)}`;
+    const buyerUserId = resolvePaymentPrincipal(
+      user?._id,
+      args.principalUserId,
+      args.challengeId,
+    );
+    const currencyAddress = args.currencyAddress.trim().toLowerCase();
+    const skillId = ctx.db.normalizeId("skills", args.skillId);
 
-    const skill = await ctx.db.get(args.skillId);
+    const expectedPaymentEvent = {
+      type: "buy" as const,
+      resourceId: args.skillId,
+      challengeId: args.challengeId,
+      receiptReference: args.receiptReference,
+      amountBaseUnits: args.amountBaseUnits,
+      currencyAddress,
+      status: "accepted",
+    };
+    const existingPaymentEvent = await ctx.db
+      .query("paymentEvents")
+      .withIndex("by_challengeId", (q) => q.eq("challengeId", args.challengeId))
+      .first();
+    assertPaymentEventCompatible(existingPaymentEvent, expectedPaymentEvent);
+
+    const existingChallenge = await ctx.db
+      .query("purchases")
+      .withIndex("by_challengeId", (q) => q.eq("challengeId", args.challengeId))
+      .first();
+    if (existingChallenge) {
+      const isExactRetry =
+        skillId !== null &&
+        existingChallenge.skillId === skillId &&
+        existingChallenge.amountBaseUnits === args.amountBaseUnits &&
+        existingChallenge.currencyAddress === currencyAddress &&
+        existingChallenge.receiptReference === args.receiptReference &&
+        existingChallenge.buyerUserId === buyerUserId;
+      if (!isExactRetry) {
+        throw new ConvexError({
+          code: "IDEMPOTENCY_CONFLICT",
+          message: "This payment challenge was already recorded with different facts.",
+        });
+      }
+      const existingSkill = await ctx.db.get(existingChallenge.skillId);
+      if (!existingSkill) {
+        throw new ConvexError({ code: "NOT_FOUND", message: "Skill not found." });
+      }
+      if (!existingPaymentEvent) {
+        await ctx.db.insert("paymentEvents", expectedPaymentEvent);
+      }
+      return {
+        purchaseId: existingChallenge._id,
+        accessGranted: true,
+        buyerUserId: existingChallenge.buyerUserId,
+        contentMarkdown: existingSkill.contentMarkdown,
+      };
+    }
+
+    if (existingPaymentEvent) {
+      paymentIdempotencyConflict();
+    }
+
+    if (!skillId) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Skill not found." });
+    }
+    const skill = await ctx.db.get(skillId);
     if (!skill) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Skill not found." });
     }
@@ -49,18 +109,22 @@ export const recordPurchase = mutation({
       });
     }
 
-    const existingChallenge = await ctx.db
-      .query("purchases")
-      .withIndex("by_challengeId", (q) => q.eq("challengeId", args.challengeId))
-      .first();
-    if (existingChallenge) {
+    const rfs = await ctx.db.get(skill.rfsId);
+    if (!rfs) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
+    }
+    if (currencyAddress !== rfs.fundingTokenAddress) {
       throw new ConvexError({
-        code: "INVALID_CHALLENGE",
-        message: "Challenge has already been consumed.",
+        code: "INVALID_CURRENCY",
+        message: "Purchase currency does not match the skill funding token.",
       });
     }
-
-    const currencyAddress = args.currencyAddress.trim().toLowerCase();
+    if (args.amountBaseUnits !== skill.purchasePriceBaseUnits) {
+      throw new ConvexError({
+        code: "INVALID_AMOUNT",
+        message: "Purchase amount must match the listed price.",
+      });
+    }
 
     const purchaseId = await ctx.db.insert("purchases", {
       skillId: skill._id,
@@ -92,48 +156,44 @@ export const recordPurchase = mutation({
       platformFeeBaseUnits,
       netAmountBaseUnits,
       status: "claimable",
-      claimGroupId: undefined,
     });
 
-    await ctx.db.insert("paymentEvents", {
-      type: "buy",
-      resourceId: skill._id,
-      challengeId: args.challengeId,
-      receiptReference: args.receiptReference,
-      amountBaseUnits: args.amountBaseUnits,
-      currencyAddress,
-      status: "accepted",
-    });
+    await ctx.db.insert("paymentEvents", expectedPaymentEvent);
 
     return {
       purchaseId,
       accessGranted: true,
       buyerUserId,
+      contentMarkdown: skill.contentMarkdown,
     };
   },
 });
 
 export const checkAccess = query({
   args: {
-    skillId: v.id("skills"),
+    skillId: v.string(),
   },
   returns: v.object({
     hasAccess: v.boolean(),
-    skill: v.union(skillDocValidator, v.null()),
+    skill: v.union(skillMetadataValidator, v.null()),
   }),
   handler: async (ctx, args) => {
-    const skill = await ctx.db.get(args.skillId);
+    const skillId = ctx.db.normalizeId("skills", args.skillId);
+    if (!skillId) {
+      return { hasAccess: false, skill: null };
+    }
+    const skill = await ctx.db.get(skillId);
     if (!skill) {
       return { hasAccess: false, skill: null };
     }
 
     const viewer = await authComponent.safeGetAuthUser(ctx);
     if (!viewer) {
-      return { hasAccess: false, skill };
+      return { hasAccess: false, skill: toSkillMetadata(skill) };
     }
 
     if (skill.authorUserId === viewer._id) {
-      return { hasAccess: true, skill };
+      return { hasAccess: true, skill: toSkillMetadata(skill) };
     }
 
     const grant = await ctx.db
@@ -143,7 +203,50 @@ export const checkAccess = query({
 
     return {
       hasAccess: Boolean(grant),
-      skill,
+      skill: toSkillMetadata(skill),
+    };
+  },
+});
+
+export const readEntitledContent = query({
+  args: {
+    skillId: v.string(),
+  },
+  returns: v.union(
+    v.object({
+      skillId: v.id("skills"),
+      contentMarkdown: v.string(),
+      status: v.literal("published"),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    const skillId = ctx.db.normalizeId("skills", args.skillId);
+    const skill = skillId ? await ctx.db.get(skillId) : null;
+    if (!skill || skill.status !== "published") {
+      return null;
+    }
+
+    const viewer = await authComponent.safeGetAuthUser(ctx);
+    if (!viewer) {
+      return null;
+    }
+    if (skill.authorUserId !== viewer._id) {
+      const grant = await ctx.db
+        .query("accessGrants")
+        .withIndex("by_user_skill", (q) =>
+          q.eq("userId", viewer._id).eq("skillId", skill._id),
+        )
+        .first();
+      if (!grant) {
+        return null;
+      }
+    }
+
+    return {
+      skillId: skill._id,
+      contentMarkdown: skill.contentMarkdown,
+      status: "published" as const,
     };
   },
 });

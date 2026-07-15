@@ -13,11 +13,14 @@ const inputStyle =
 const primaryButtonStyle =
   "bg-gray-900 text-white font-mono text-sm px-6 py-2 rounded-md disabled:opacity-60"
 
-const secondaryButtonStyle =
-  "border border-gray-300 text-gray-700 font-mono text-sm px-6 py-2 rounded-md disabled:opacity-60"
-
-const resolveNextPath = (nextPath: string | null) => {
-  if (!nextPath || !nextPath.startsWith("/")) {
+export const resolveNextPath = (nextPath: string | null) => {
+  if (
+    !nextPath ||
+    !nextPath.startsWith("/") ||
+    nextPath.startsWith("//") ||
+    nextPath.includes("\\") ||
+    /[\u0000-\u001f\u007f]/.test(nextPath)
+  ) {
     return "/me"
   }
 
@@ -34,7 +37,6 @@ export function SignInForm() {
   const [name, setName] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false)
-  const [isSubmittingPasskey, setIsSubmittingPasskey] = useState(false)
 
   const nextPath = resolveNextPath(searchParams.get("next"))
 
@@ -76,23 +78,6 @@ export function SignInForm() {
       completeSignIn()
     } finally {
       setIsSubmittingEmail(false)
-    }
-  }
-
-  const handlePasskeySignIn = async () => {
-    setError(null)
-    setIsSubmittingPasskey(true)
-
-    try {
-      const result = await authClient.signIn.passkey({ autoFill: true })
-      if (result.error) {
-        setError(result.error.message ?? "Unable to sign in with passkey.")
-        return
-      }
-
-      completeSignIn()
-    } finally {
-      setIsSubmittingPasskey(false)
     }
   }
 
@@ -178,17 +163,6 @@ export function SignInForm() {
                 : "create account"}
           </button>
         </form>
-
-        <div className="pt-1 border-t border-border/70">
-          <button
-            type="button"
-            onClick={handlePasskeySignIn}
-            className={secondaryButtonStyle}
-            disabled={isSubmittingPasskey}
-          >
-            {isSubmittingPasskey ? "opening passkey..." : "sign in with passkey"}
-          </button>
-        </div>
 
         {error ? <p className="text-xs font-mono text-rose-700">{error}</p> : null}
       </div>

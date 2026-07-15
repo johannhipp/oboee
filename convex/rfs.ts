@@ -3,15 +3,15 @@ import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { authComponent } from "./auth";
+import { canSubmitRfs } from "./lib/capabilities";
 
-const walletAddressValidator = /^0x[a-fA-F0-9]{40}$/;
+const moderatoPathUsd = "0x20c0000000000000000000000000000000000000";
+const maxMvpPaymentBaseUnits = BigInt(9_000);
 
 const rfsStatusValidator = v.union(
   v.literal("open"),
   v.literal("funded"),
-  v.literal("fulfilled"),
   v.literal("published"),
-  v.literal("cancelled"),
 );
 
 const rfsDocValidator = v.object({
@@ -113,16 +113,22 @@ export const create = mutation({
         message: "Minimum contribution must be at least 1 base unit.",
       });
     }
+    if (args.minimumContributionBaseUnits > maxMvpPaymentBaseUnits) {
+      throw new ConvexError({
+        code: "INVALID_MINIMUM_CONTRIBUTION",
+        message: "Minimum contribution must not exceed 9000 testnet base units.",
+      });
+    }
     if (args.minimumContributionBaseUnits > args.fundingThresholdBaseUnits) {
       throw new ConvexError({
         code: "INVALID_MINIMUM_CONTRIBUTION",
         message: "Minimum contribution cannot exceed funding threshold.",
       });
     }
-    if (!walletAddressValidator.test(fundingTokenAddress)) {
+    if (fundingTokenAddress !== moderatoPathUsd) {
       throw new ConvexError({
         code: "INVALID_TOKEN_ADDRESS",
-        message: "Funding token address must be a valid 0x-prefixed 40-hex string.",
+        message: "Funding token must be Tempo Moderato pathUSD.",
       });
     }
 
@@ -146,7 +152,7 @@ export const create = mutation({
 
 export const get = query({
   args: {
-    rfsId: v.id("rfs"),
+    rfsId: v.string(),
   },
   returns: v.object({
     rfs: rfsDocValidator,
@@ -155,7 +161,8 @@ export const get = query({
     hasClaimant: v.boolean(),
   }),
   handler: async (ctx, args) => {
-    const rfs = await ctx.db.get(args.rfsId);
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    const rfs = rfsId ? await ctx.db.get(rfsId) : null;
 
     if (!rfs) {
       throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
@@ -168,6 +175,8 @@ export const get = query({
     return { rfs, canFund, canClaim, hasClaimant };
   },
 });
+
+export const getPublic = get;
 
 export const list = query({
   args: {
@@ -202,7 +211,7 @@ export const list = query({
 
 export const listContributions = query({
   args: {
-    rfsId: v.id("rfs"),
+    rfsId: v.string(),
   },
   returns: v.array(
     v.object({
@@ -213,9 +222,13 @@ export const listContributions = query({
     }),
   ),
   handler: async (ctx, args) => {
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    if (!rfsId) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
+    }
     const rows = await ctx.db
       .query("contributions")
-      .withIndex("by_rfs", (q) => q.eq("rfsId", args.rfsId))
+      .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
       .order("desc")
       .collect();
 
@@ -232,7 +245,7 @@ export const listContributions = query({
 
 export const claim = mutation({
   args: {
-    rfsId: v.id("rfs"),
+    rfsId: v.string(),
   },
   returns: v.object({
     rfsId: v.id("rfs"),
@@ -241,7 +254,11 @@ export const claim = mutation({
   }),
   handler: async (ctx, args) => {
     const callerUserId = await requireAuthedUserId(ctx);
-    const rfs = await getRfsByIdOrThrow(ctx, args.rfsId);
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    if (!rfsId) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
+    }
+    const rfs = await getRfsByIdOrThrow(ctx, rfsId);
 
     if (rfs.status !== "funded") {
       throw new ConvexError({
@@ -271,7 +288,7 @@ export const claim = mutation({
 
 export const submit = mutation({
   args: {
-    rfsId: v.id("rfs"),
+    rfsId: v.string(),
     contentMarkdown: v.string(),
     summary: v.string(),
     tags: v.array(v.string()),
@@ -306,8 +323,18 @@ export const submit = mutation({
         message: "Purchase price must be at least 1 base unit.",
       });
     }
+    if (args.purchasePriceBaseUnits > maxMvpPaymentBaseUnits) {
+      throw new ConvexError({
+        code: "INVALID_PRICE",
+        message: "Purchase price must not exceed 9000 testnet base units.",
+      });
+    }
 
-    const rfs = await getRfsByIdOrThrow(ctx, args.rfsId);
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    if (!rfsId) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
+    }
+    const rfs = await getRfsByIdOrThrow(ctx, rfsId);
 
     if (rfs.claimantUserId !== callerUserId) {
       throw new ConvexError({
@@ -316,10 +343,10 @@ export const submit = mutation({
       });
     }
 
-    if (rfs.status !== "funded" && rfs.status !== "fulfilled" && rfs.status !== "published") {
+    if (!canSubmitRfs(rfs, callerUserId)) {
       throw new ConvexError({
         code: "INVALID_STATE",
-        message: "RFS must be funded before submission.",
+        message: "RFS is not available for submission.",
       });
     }
 
@@ -351,12 +378,7 @@ export const submit = mutation({
       });
     }
 
-    if (rfs.status === "funded") {
-      await ctx.db.patch(rfs._id, { status: "fulfilled" });
-    }
-    if (rfs.status !== "published") {
-      await ctx.db.patch(rfs._id, { status: "published" });
-    }
+    await ctx.db.patch(rfs._id, { status: "published" });
 
     const acceptedContributions = await ctx.db
       .query("contributions")

@@ -9,8 +9,6 @@ export const dynamic = "force-dynamic"
 
 export const metadata: Metadata = { title: "Browse | Oboe" }
 
-const statusOrder = ["open", "funded", "fulfilled", "published"] as const
-
 const isStatus = (value: string | undefined) =>
   value === "open" || value === "funded" || value === "published"
 
@@ -34,19 +32,7 @@ export default async function BrowsePage({
       .includes(q)
   })
 
-  const sortedRfs = filtered
-    .map(toRfsViewModel)
-    .sort((a, b) => {
-      const aIdx = statusOrder.indexOf(a.status)
-      const bIdx = statusOrder.indexOf(b.status)
-      if (aIdx !== bIdx) return aIdx - bIdx
-      if (a.status === "open" && b.status === "open") {
-        const aRatio = a.fundingThreshold > 0 ? a.currentAmount / a.fundingThreshold : 0
-        const bRatio = b.fundingThreshold > 0 ? b.currentAmount / b.fundingThreshold : 0
-        return bRatio - aRatio
-      }
-      return 0
-    })
+  const visibleRfs = filtered.map(toRfsViewModel)
 
   const pills = [
     { label: "all", href: "/browse", active: !status },
@@ -90,15 +76,14 @@ export default async function BrowsePage({
       </div>
 
       <div className="flex items-center gap-4 px-3 py-2 text-xs font-mono uppercase text-muted-foreground border-b border-gray-200 mb-1">
-        <span className="w-6 text-right">#</span>
         <span className="flex-1">title</span>
         <span className="w-20">status</span>
-        <span className="w-28 text-right">funded</span>
-        <span className="w-24">author</span>
+        <span className="hidden sm:block w-28 text-right">funded</span>
+        <span className="hidden md:block w-24">author</span>
       </div>
 
-      {sortedRfs.map((rfs, i) => (
-        <RFSRow key={rfs.id} rfs={rfs} rank={i + 1} />
+      {visibleRfs.map((rfs) => (
+        <RFSRow key={rfs.id} rfs={rfs} />
       ))}
     </section>
   )

@@ -16,9 +16,7 @@ export default defineSchema({
     status: v.union(
       v.literal("open"),
       v.literal("funded"),
-      v.literal("fulfilled"),
       v.literal("published"),
-      v.literal("cancelled"),
     ),
   })
     .index("by_status", ["status"])
@@ -32,7 +30,7 @@ export default defineSchema({
     currencyAddress: v.string(),
     challengeId: v.string(),
     receiptReference: v.string(),
-    status: v.union(v.literal("accepted"), v.literal("rejected")),
+    status: v.literal("accepted"),
   })
     .index("by_rfs", ["rfsId"])
     .index("by_backer", ["backerUserId"])
@@ -45,11 +43,7 @@ export default defineSchema({
     summary: v.string(),
     tags: v.array(v.string()),
     purchasePriceBaseUnits: v.int64(),
-    status: v.union(
-      v.literal("draft"),
-      v.literal("submitted"),
-      v.literal("published"),
-    ),
+    status: v.literal("published"),
   })
     .index("by_rfs", ["rfsId"])
     .index("by_status", ["status"]),
@@ -72,11 +66,16 @@ export default defineSchema({
     source: v.union(
       v.literal("backer_unlock"),
       v.literal("purchase"),
-      v.literal("admin"),
     ),
   })
     .index("by_user_skill", ["userId", "skillId"])
     .index("by_skill", ["skillId"]),
+
+  payoutWallets: defineTable({
+    userId: v.string(),
+    walletAddress: v.string(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
 
   payoutLedger: defineTable({
     rfsId: v.id("rfs"),
@@ -84,11 +83,7 @@ export default defineSchema({
     grossAmountBaseUnits: v.int64(),
     platformFeeBaseUnits: v.int64(),
     netAmountBaseUnits: v.int64(),
-    status: v.union(
-      v.literal("locked"),
-      v.literal("claimable"),
-      v.literal("claimed"),
-    ),
+    status: v.literal("claimable"),
     receiptReference: v.optional(v.string()),
   })
     .index("by_rfs", ["rfsId"])
@@ -102,18 +97,15 @@ export default defineSchema({
     grossAmountBaseUnits: v.int64(),
     platformFeeBaseUnits: v.int64(),
     netAmountBaseUnits: v.int64(),
-    status: v.union(v.literal("claimable"), v.literal("claimed")),
-    claimGroupId: v.optional(v.string()),
+    status: v.literal("claimable"),
   })
     .index("by_researcher_status", ["researcherUserId", "status"])
-    .index("by_rfs", ["rfsId"])
-    .index("by_claimGroup", ["claimGroupId"]),
+    .index("by_rfs", ["rfsId"]),
 
   paymentEvents: defineTable({
     type: v.union(
       v.literal("fund"),
       v.literal("buy"),
-      v.literal("payout_claim"),
     ),
     resourceId: v.string(),
     challengeId: v.string(),

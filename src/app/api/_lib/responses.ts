@@ -29,6 +29,10 @@ export const errorResponse = (code: string, message: string, status = 400) =>
   );
 
 const toCodeAndMessage = (error: unknown): { code: string; message: string } => {
+  if (error instanceof SyntaxError) {
+    return { code: "INVALID_JSON", message: "Request body must be valid JSON." };
+  }
+
   if (error instanceof ConvexError) {
     const data = error.data;
     if (
@@ -43,14 +47,26 @@ const toCodeAndMessage = (error: unknown): { code: string; message: string } => 
     }
   }
 
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    error.message
+  ) {
+    return { code: error.code, message: error.message };
+  }
+
   if (error instanceof Error && error.message) {
-    try {
-      const parsed = JSON.parse(error.message) as { code?: unknown; message?: unknown };
-      if (typeof parsed.code === "string" && typeof parsed.message === "string") {
-        return { code: parsed.code, message: parsed.message };
+    const candidates = [error.message, ...(error.message.match(/\{[^{}\r\n]*\}/g) ?? [])];
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate) as { code?: unknown; message?: unknown };
+        if (typeof parsed.code === "string" && typeof parsed.message === "string") {
+          return { code: parsed.code, message: parsed.message };
+        }
+      } catch {
+        // A wrapped Convex message can contain non-JSON text around the payload.
       }
-    } catch {
-      return { code: "INTERNAL_ERROR", message: error.message };
     }
   }
 
@@ -67,7 +83,14 @@ const statusForCode = (code: string) => {
   if (code === "FORBIDDEN") {
     return 403;
   }
-  if (code === "ALREADY_CLAIMED" || code === "INVALID_STATE") {
+  if (code === "PAYMENT_UNAVAILABLE") {
+    return 503;
+  }
+  if (
+    code === "ALREADY_CLAIMED" ||
+    code === "IDEMPOTENCY_CONFLICT" ||
+    code === "INVALID_STATE"
+  ) {
     return 409;
   }
   if (code.startsWith("INVALID_")) {

@@ -17,14 +17,14 @@ const routes = [
     path: "/api/skills/[id]",
     auth: false,
     mpp: false,
-    description: "get detail for a skill or RFS by id. returns rfs, skill, and action flags (canFund, canClaim, canBuy)",
+    description: "get public metadata for one skill plus its RFS and caller-specific action flags",
   },
   {
     method: "GET",
     path: "/api/skills/[id]/content",
     auth: false,
     mpp: true,
-    description: "get the full skill markdown. free if you backed it, otherwise MPP payment required (~$0.005)",
+    description: "get full Markdown with account entitlement, or buy one copy for the exact listed testnet price",
   },
   {
     method: "POST",
@@ -36,9 +36,9 @@ const routes = [
   {
     method: "GET",
     path: "/api/rfs/[id]",
-    auth: true,
+    auth: false,
     mpp: false,
-    description: "get RFS detail with contribution info",
+    description: "get public RFS status and funding progress",
   },
   {
     method: "POST",
@@ -59,7 +59,7 @@ const routes = [
     path: "/api/rfs/[id]/submit",
     auth: true,
     mpp: false,
-    description: "submit skill for a claimed RFS. body: { contentMarkdown, purchasePriceBaseUnits }. auto-publishes",
+    description: "submit skill for a claimed RFS. body: { contentMarkdown, summary, tags[], purchasePriceBaseUnits }. auto-publishes",
   },
   {
     method: "POST",
@@ -80,6 +80,9 @@ export default function DocsPage() {
           skip the API. paste this into your agent and it will figure out the rest:
         </p>
         <CopyBox text="Read https://oboe.sh/SKILL.md and follow the instructions to set up oboe" />
+        <p className="text-xs text-muted-foreground mt-3">
+          MVP payments are testnet-only: Tempo Moderato pathUSD, always below $0.01.
+        </p>
       </AsciiBox>
 
       <div className="mt-8">
@@ -118,7 +121,7 @@ export default function DocsPage() {
         </AsciiBox>
 
         <div className="mt-6 space-y-3 font-mono text-xs text-muted-foreground">
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2">
             <span className="text-[10px] font-semibold uppercase leading-none px-1.5 py-0.5 rounded-full ring-1 ring-amber-300 text-amber-700 bg-amber-50">
               auth
             </span>
@@ -133,7 +136,7 @@ export default function DocsPage() {
               <a href="https://mpp.dev" className="underline hover:text-foreground transition-colors duration-150">
                 Machine Payments Protocol
               </a>
-              {" "}(HTTP 402 flow)
+              {" "}(HTTP 402 flow on Tempo Moderato)
             </span>
           </div>
         </div>

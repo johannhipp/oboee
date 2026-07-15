@@ -18,15 +18,15 @@ export default async function Home() {
   const recentlyPublished = publishedRows.map(toRfsViewModel).slice(0, 4)
 
   return (
-    <main className="my-8 max-w-2xl mx-auto">
+    <div className="my-8 max-w-2xl min-w-0 mx-auto">
       <div className="flex flex-col items-center text-center">
-        <pre className="text-[15px] tracking-[-1px] leading-[125%] text-gray-400 select-none whitespace-pre font-[family-name:var(--font-fira-mono)]">
+        <pre className="max-w-full overflow-hidden text-[8px] sm:text-[15px] tracking-[-1px] leading-[125%] text-gray-400 select-none whitespace-pre font-[family-name:var(--font-fira-mono)]">
           {OBOE_ASCII}
         </pre>
         <p className="text-[19px] tracking-tight text-gray-900 font-mono font-medium uppercase mt-6">
           Crowdfunded agent skills
         </p>
-        <div className="mt-8 space-y-1.5">
+        <div className="mt-8 w-full max-w-xl space-y-1.5">
           <p className="text-[10px] font-mono uppercase text-muted-foreground tracking-wide">
             paste this into your agent
           </p>
@@ -42,8 +42,8 @@ export default async function Home() {
           open requests
         </h2>
         <AsciiBox title="open">
-          {openRequests.map((rfs, i) => (
-            <RFSRow key={rfs.id} rfs={rfs} rank={i + 1} />
+          {openRequests.map((rfs) => (
+            <RFSRow key={rfs.id} rfs={rfs} />
           ))}
         </AsciiBox>
       </div>
@@ -58,6 +58,6 @@ export default async function Home() {
           ))}
         </AsciiBox>
       </div>
-    </main>
+    </div>
   )
 }

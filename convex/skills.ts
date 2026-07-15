@@ -2,24 +2,14 @@ import { ConvexError, type Infer, v } from "convex/values";
 
 import { query } from "./_generated/server";
 import { authComponent } from "./auth";
+import { canSubmitRfs } from "./lib/capabilities";
+import { skillMetadataValidator, toSkillMetadata } from "./lib/skillMetadata";
 
 const catalogStatusValidator = v.union(
   v.literal("open"),
   v.literal("funded"),
   v.literal("published"),
 );
-
-const skillDocValidator = v.object({
-  _id: v.id("skills"),
-  _creationTime: v.number(),
-  rfsId: v.id("rfs"),
-  authorUserId: v.string(),
-  contentMarkdown: v.string(),
-  summary: v.string(),
-  tags: v.array(v.string()),
-  purchasePriceBaseUnits: v.int64(),
-  status: v.union(v.literal("draft"), v.literal("submitted"), v.literal("published")),
-});
 
 const rfsDocValidator = v.object({
   _id: v.id("rfs"),
@@ -37,9 +27,7 @@ const rfsDocValidator = v.object({
   status: v.union(
     v.literal("open"),
     v.literal("funded"),
-    v.literal("fulfilled"),
     v.literal("published"),
-    v.literal("cancelled"),
   ),
 });
 
@@ -79,14 +67,15 @@ const searchMatches = (queryText: string, fields: string[]) => {
 
 export const get = query({
   args: {
-    skillId: v.optional(v.id("skills")),
-    rfsId: v.optional(v.id("rfs")),
+    skillId: v.optional(v.string()),
+    rfsId: v.optional(v.string()),
   },
   returns: v.object({
     rfs: v.optional(rfsDocValidator),
-    skill: v.optional(skillDocValidator),
+    skill: v.optional(skillMetadataValidator),
     canFund: v.boolean(),
     canClaim: v.boolean(),
+    canSubmit: v.boolean(),
     canBuy: v.boolean(),
     hasAccess: v.boolean(),
   }),
@@ -98,12 +87,21 @@ export const get = query({
       });
     }
 
-    let skill = args.skillId ? (await ctx.db.get(args.skillId)) ?? undefined : undefined;
+    const skillId = args.skillId ? ctx.db.normalizeId("skills", args.skillId) : null;
+    const rfsId = args.rfsId ? ctx.db.normalizeId("rfs", args.rfsId) : null;
+    if (args.skillId && !skillId) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Skill not found." });
+    }
+    if (args.rfsId && !rfsId) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
+    }
 
-    if (!skill && args.rfsId) {
+    let skill = skillId ? (await ctx.db.get(skillId)) ?? undefined : undefined;
+
+    if (!skill && rfsId) {
       const skillByRfs = await ctx.db
         .query("skills")
-        .withIndex("by_rfs", (q) => q.eq("rfsId", args.rfsId!))
+        .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
         .first();
       skill = skillByRfs ?? undefined;
     }
@@ -112,7 +110,7 @@ export const get = query({
       throw new ConvexError({ code: "NOT_FOUND", message: "Skill not found." });
     }
 
-    const targetRfsId = args.rfsId ?? skill?.rfsId;
+    const targetRfsId = rfsId ?? skill?.rfsId;
     if (!targetRfsId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "RFS not found." });
     }
@@ -140,13 +138,15 @@ export const get = query({
     const hasClaimant = Boolean(rfs.claimantUserId);
     const canFund = rfs.status === "open";
     const canClaim = rfs.status === "funded" && !hasClaimant;
+    const canSubmit = canSubmitRfs(rfs, viewer?._id);
     const canBuy = Boolean(skill && skill.status === "published" && !hasAccess);
 
     return {
       rfs,
-      skill,
+      skill: skill ? toSkillMetadata(skill) : undefined,
       canFund,
       canClaim,
+      canSubmit,
       canBuy,
       hasAccess,
     };

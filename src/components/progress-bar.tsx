@@ -1,3 +1,5 @@
+import { formatTokenAmount } from "@/lib/view-models"
+
 interface ProgressBarProps {
   current: number
   goal: number
@@ -13,7 +15,7 @@ export function ProgressBar({ current, goal, className }: ProgressBarProps) {
   return (
     <div className={`space-y-1 ${className ?? ""}`}>
       <div className="text-sm font-mono font-medium">
-        ${current.toFixed(2)} / ${goal.toFixed(2)}
+        ${formatTokenAmount(current)} / ${formatTokenAmount(goal)}
       </div>
       <div className="text-xs font-mono text-muted-foreground">
         [{bar}] {Math.round(pct * 100)}%

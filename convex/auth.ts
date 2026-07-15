@@ -1,6 +1,5 @@
 import { createClient, type GenericCtx } from "@convex-dev/better-auth";
 import { convex } from "@convex-dev/better-auth/plugins";
-import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth/minimal";
 
 import authConfig from "./auth.config";
@@ -26,7 +25,6 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
       requireEmailVerification: false,
     },
     plugins: [
-      passkey(),
       convex({
         authConfig,
       }),

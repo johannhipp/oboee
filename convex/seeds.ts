@@ -1,16 +1,22 @@
 import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
+import { assertServerSecret } from "./lib/secretBoundary";
 
-const MAINNET_USDC = "0x20c000000000000000000000b9537d11c60e8b50";
+const MODERATO_PATH_USD = "0x20c0000000000000000000000000000000000000";
 
 export const seedCveDataset = mutation({
-  args: {},
+  args: { seedSecret: v.string() },
   returns: v.object({
     createdRfsIds: v.array(v.id("rfs")),
     reusedRfsIds: v.array(v.id("rfs")),
   }),
-  handler: async (ctx) => {
+  handler: async (ctx, args) => {
+    assertServerSecret(
+      args.seedSecret,
+      "OBOE_SEED_SECRET",
+      "Development seeds are not configured.",
+    );
     const definitions = [
       {
         title: "CVE chain: edge exhaustion -> origin desync",
@@ -85,7 +91,7 @@ export const seedCveDataset = mutation({
         fundingThresholdBaseUnits: def.fundingThresholdBaseUnits,
         minimumContributionBaseUnits: def.minimumContributionBaseUnits,
         currentAmountBaseUnits: def.currentAmountBaseUnits,
-        fundingTokenAddress: MAINNET_USDC,
+        fundingTokenAddress: MODERATO_PATH_USD,
         status: def.status,
       });
 
@@ -121,9 +127,7 @@ export const listSeededRfs = query({
       status: v.union(
         v.literal("open"),
         v.literal("funded"),
-        v.literal("fulfilled"),
         v.literal("published"),
-        v.literal("cancelled"),
       ),
       currentAmountBaseUnits: v.int64(),
       fundingThresholdBaseUnits: v.int64(),
@@ -146,6 +150,7 @@ export const listSeededRfs = query({
 export const publishFundedSeedRfs = mutation({
   args: {
     rfsId: v.id("rfs"),
+    seedSecret: v.string(),
   },
   returns: v.object({
     rfsId: v.id("rfs"),
@@ -153,6 +158,11 @@ export const publishFundedSeedRfs = mutation({
     status: v.literal("published"),
   }),
   handler: async (ctx, args) => {
+    assertServerSecret(
+      args.seedSecret,
+      "OBOE_SEED_SECRET",
+      "Development seeds are not configured.",
+    );
     const rfs = await ctx.db.get(args.rfsId);
     if (!rfs) {
       throw new Error("RFS not found");

@@ -1,4 +1,4 @@
-export type RFSStatus = "open" | "funded" | "fulfilled" | "published"
+export type RFSStatus = "open" | "funded" | "published"
 
 export interface User {
   id: string

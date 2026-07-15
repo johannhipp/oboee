@@ -1,13 +1,13 @@
 import type { Metadata } from "next"
 import { fetchQuery } from "convex/nextjs"
 import { api } from "../../../../convex/_generated/api"
-import type { Id } from "../../../../convex/_generated/dataModel"
 import { AsciiBox } from "@/components/ascii-box"
 import { ProgressBar } from "@/components/progress-bar"
 import { StatusBadge } from "@/components/status-badge"
 import { RfsActions } from "@/components/rfs-actions"
 import { CopyId } from "@/components/copy-id"
-import { baseUnitsToNumber } from "@/lib/view-models"
+import { fetchAuthQuery, isAuthenticated } from "@/lib/auth-server"
+import { baseUnitsToNumber, formatTokenAmount } from "@/lib/view-models"
 
 export const dynamic = "force-dynamic"
 
@@ -18,7 +18,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params
   try {
-    const detail = await fetchQuery(api.skills.get, { rfsId: id as Id<"rfs"> })
+    const detail = await fetchQuery(api.skills.get, { rfsId: id })
     return { title: detail.rfs ? `${detail.rfs.title} | Oboe` : "Not found | Oboe" }
   } catch {
     return { title: "Not found | Oboe" }
@@ -31,12 +31,18 @@ export default async function Page({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const rfsId = id as Id<"rfs">
+  const signedIn = await isAuthenticated()
+  const detailPromise = signedIn
+    ? fetchAuthQuery(api.skills.get, { rfsId: id })
+    : fetchQuery(api.skills.get, { rfsId: id })
 
-  let detail: Awaited<ReturnType<typeof fetchQuery<typeof api.skills.get>>>
-
+  let detail: Awaited<typeof detailPromise>
+  let contributions: Awaited<ReturnType<typeof fetchQuery<typeof api.rfs.listContributions>>>
   try {
-    detail = await fetchQuery(api.skills.get, { rfsId })
+    ;[detail, contributions] = await Promise.all([
+      detailPromise,
+      fetchQuery(api.rfs.listContributions, { rfsId: id }),
+    ])
   } catch {
     return (
       <div className="py-16 text-center text-muted-foreground font-mono text-sm">
@@ -45,7 +51,6 @@ export default async function Page({
     )
   }
 
-  const contributions = await fetchQuery(api.rfs.listContributions, { rfsId })
   const rfs = detail.rfs
 
   if (!rfs) {
@@ -59,7 +64,7 @@ export default async function Page({
   const skill = detail.skill
   const currentAmount = baseUnitsToNumber(rfs.currentAmountBaseUnits)
   const fundingThreshold = baseUnitsToNumber(rfs.fundingThresholdBaseUnits)
-  const displayStatus = rfs.status === "cancelled" ? "fulfilled" : rfs.status
+  const displayStatus = rfs.status
 
   return (
     <div className="flex flex-col lg:flex-row gap-8 my-8">
@@ -78,17 +83,16 @@ export default async function Page({
           <p className="text-sm leading-relaxed mt-2 break-words">{rfs.description}</p>
         </AsciiBox>
 
-        {(rfs.status === "published" || rfs.status === "fulfilled") &&
-          skill && (
-            <AsciiBox title="skill preview" className="mt-6">
-              <p className="text-sm leading-relaxed break-words">
-                {skill.contentMarkdown.slice(0, 200)}...
-              </p>
-              <p className="text-xs text-muted-foreground mt-2 font-mono">
-                buy to read full skill
-              </p>
-            </AsciiBox>
-          )}
+        {rfs.status === "published" && skill && (
+          <AsciiBox title="skill preview" className="mt-6">
+            <p className="text-sm leading-relaxed break-words">
+              {skill.summary}
+            </p>
+            <p className="text-xs text-muted-foreground mt-2 font-mono">
+              buy to read full skill
+            </p>
+          </AsciiBox>
+        )}
       </div>
 
       <div className="lg:w-72 lg:shrink-0 lg:sticky lg:top-20 lg:self-start">
@@ -112,9 +116,11 @@ export default async function Page({
             status={displayStatus}
             canFund={detail.canFund}
             canClaim={detail.canClaim}
+            canSubmit={detail.canSubmit}
             canBuy={detail.canBuy}
             skillId={skill?._id}
-            hasSkill={Boolean(skill)}
+            hasAccess={detail.hasAccess}
+            signedIn={signedIn}
           />
 
           <div className="mt-4 border-t border-border pt-3">
@@ -128,7 +134,7 @@ export default async function Page({
                   className="flex justify-between font-mono text-sm"
                 >
                   <CopyId id={c.backerUserId} className="text-sm" />
-                  <span>${baseUnitsToNumber(c.amountBaseUnits).toFixed(2)}</span>
+                  <span>${formatTokenAmount(baseUnitsToNumber(c.amountBaseUnits))}</span>
                 </div>
               )
             })}

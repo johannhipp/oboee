@@ -1,5 +1,7 @@
 import { api } from "../../../../convex/_generated/api";
 import { fetchAuthMutation, isAuthenticated } from "@/lib/auth-server";
+import { getMppFundingTokenAddress } from "@/lib/mpp";
+import { isMvpPaymentBaseUnits } from "@/lib/tempo";
 
 import { errorResponse, errorResponseFrom, okWriteResponse } from "../_lib/responses";
 
@@ -29,7 +31,6 @@ export async function POST(request: Request) {
       tags?: unknown;
       fundingThresholdBaseUnits?: unknown;
       minimumContributionBaseUnits?: unknown;
-      fundingTokenAddress?: unknown;
     };
 
     if (
@@ -42,24 +43,18 @@ export async function POST(request: Request) {
       return errorResponse("INVALID_ARGUMENT", "Invalid create RFS payload.", 400);
     }
 
-    const fundingTokenAddress =
-      typeof body.fundingTokenAddress === "string" && body.fundingTokenAddress.trim().length > 0
-        ? body.fundingTokenAddress
-        : process.env.MPP_FUNDING_TOKEN_ADDRESS;
-
-    if (!fundingTokenAddress) {
-      return errorResponse(
-        "INVALID_ARGUMENT",
-        "fundingTokenAddress is required when MPP_FUNDING_TOKEN_ADDRESS is unset.",
-        400,
-      );
-    }
-
     const fundingThresholdBaseUnits = parseBaseUnits(body.fundingThresholdBaseUnits);
     const minimumContributionBaseUnits = parseBaseUnits(body.minimumContributionBaseUnits);
 
     if (fundingThresholdBaseUnits === null || minimumContributionBaseUnits === null) {
       return errorResponse("INVALID_ARGUMENT", "Base unit values must be integer strings.", 400);
+    }
+    if (!isMvpPaymentBaseUnits(minimumContributionBaseUnits)) {
+      return errorResponse(
+        "INVALID_MINIMUM_CONTRIBUTION",
+        "Minimum contribution must be 1..9000 testnet base units.",
+        400,
+      );
     }
 
     const result = await fetchAuthMutation(api.rfs.create, {
@@ -69,7 +64,7 @@ export async function POST(request: Request) {
       tags: body.tags,
       fundingThresholdBaseUnits,
       minimumContributionBaseUnits,
-      fundingTokenAddress,
+      fundingTokenAddress: getMppFundingTokenAddress(),
     });
 
     return okWriteResponse("rfs", result.rfsId, result.nextState);

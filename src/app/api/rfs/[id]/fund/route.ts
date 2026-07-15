@@ -1,14 +1,30 @@
-import { Credential } from "mppx";
 import { fetchMutation, fetchQuery } from "convex/nextjs";
 
 import { api } from "../../../../../../convex/_generated/api";
-import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { errorResponse, errorResponseFrom, okWriteResponse } from "@/app/api/_lib/responses";
-import { getMppx } from "@/lib/mpp";
+import { readVerifiedPayment } from "@/app/api/_lib/payment";
+import { getToken } from "@/lib/auth-server";
+import { getMppx, getPaymentRecordingSecret } from "@/lib/mpp";
+import { isMvpPaymentBaseUnits } from "@/lib/tempo";
 
 const MPP_DECIMALS = 6;
 const AMOUNT_DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
-const MAX_TEST_AMOUNT_BASE_UNITS = BigInt(9_000);
+
+export const canAttemptFundingPayment = (
+  rfsStatus: string,
+  authorization: string | null,
+) => rfsStatus === "open" || /^Payment\s/i.test(authorization ?? "");
+
+export const preventClosedFundingChallenge = (
+  rfsStatus: string,
+  response: Response,
+) => {
+  if (rfsStatus !== "open" && response.status === 402) {
+    return errorResponse("INVALID_STATE", "RFS can only be funded while open.", 409);
+  }
+
+  return response;
+};
 
 const parseAmountStringToBaseUnits = (amount: string): bigint | null => {
   const normalized = amount.trim();
@@ -34,21 +50,30 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     const amountBaseUnitsFromInput = parseAmountStringToBaseUnits(body.amount);
-    if (amountBaseUnitsFromInput === null || amountBaseUnitsFromInput < BigInt(1)) {
+    if (amountBaseUnitsFromInput === null) {
       return errorResponse("INVALID_ARGUMENT", "amount must be a positive decimal string.", 400);
     }
-    if (amountBaseUnitsFromInput > MAX_TEST_AMOUNT_BASE_UNITS) {
+    if (!isMvpPaymentBaseUnits(amountBaseUnitsFromInput)) {
       return errorResponse(
         "INVALID_ARGUMENT",
-        "For MVP testing, amount must be below $0.01.",
+        "For MVP testing, amount must be 1..9000 base units.",
         400,
       );
     }
 
     const { id } = await context.params;
-    const rfsId = id as Id<"rfs">;
-    const rfsDetail = await fetchQuery(api.rfs.get, { rfsId });
-    if (!rfsDetail.canFund || rfsDetail.rfs.status !== "open") {
+    const token = await getToken();
+    const convexOptions = token ? { token } : {};
+    const viewer = token
+      ? await fetchQuery(api.users.getViewer, {}, convexOptions)
+      : null;
+    const rfsDetail = await fetchQuery(api.rfs.get, { rfsId: id }, convexOptions);
+    if (
+      !canAttemptFundingPayment(
+        rfsDetail.rfs.status,
+        request.headers.get("Authorization"),
+      )
+    ) {
       return errorResponse("INVALID_STATE", "RFS can only be funded while open.", 409);
     }
     if (amountBaseUnitsFromInput < rfsDetail.rfs.minimumContributionBaseUnits) {
@@ -59,50 +84,29 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       );
     }
 
-    const paidHandler = getMppx().charge({ amount: body.amount })(async (paidRequest: Request) => {
-      const credential = Credential.fromRequest(paidRequest);
-      const challengeRequest = credential.challenge.request as {
-        amount?: unknown;
-        currency?: unknown;
-      };
-      const challengeAmount = challengeRequest.amount;
-      if (typeof challengeAmount !== "string" || !/^\d+$/.test(challengeAmount)) {
-        return errorResponse(
-          "INVALID_CHALLENGE",
-          "Paid credential did not include a valid amount.",
-          400,
-        );
-      }
-
-      const currencyAddressRaw = challengeRequest.currency;
-      if (typeof currencyAddressRaw !== "string") {
-        return errorResponse("INVALID_CHALLENGE", "Paid credential did not include a currency.", 400);
-      }
-
-      const rawPayload = credential.payload as {
-        type?: unknown;
-        hash?: unknown;
-        signature?: unknown;
-      };
-      const payloadReceiptReference =
-        rawPayload.type === "hash" && typeof rawPayload.hash === "string"
-          ? rawPayload.hash
-          : rawPayload.type === "transaction" && typeof rawPayload.signature === "string"
-            ? rawPayload.signature
-            : null;
-
+    const paidHandler = getMppx().charge({
+      amount: body.amount,
+      description: `Fund RFS ${id}`,
+      ...(viewer ? { externalId: viewer.userId } : {}),
+    })(async (paidRequest: Request) => {
+      const payment = readVerifiedPayment(paidRequest);
       const result = await fetchMutation(api.contributions.recordContribution, {
-        rfsId,
-        amountBaseUnits: BigInt(challengeAmount),
-        currencyAddress: currencyAddressRaw,
-        challengeId: credential.challenge.id,
-        receiptReference: payloadReceiptReference ?? credential.challenge.id,
-      });
+        rfsId: id,
+        amountBaseUnits: payment.amountBaseUnits,
+        currencyAddress: payment.currencyAddress,
+        challengeId: payment.challengeId,
+        receiptReference: payment.receiptReference,
+        ...(payment.principalUserId
+          ? { principalUserId: payment.principalUserId }
+          : {}),
+        serverSecret: getPaymentRecordingSecret(),
+      }, convexOptions);
 
       return okWriteResponse("contribution", result.contributionId, result.rfsNextState);
     });
 
-    return paidHandler(request);
+    const paymentResponse = await paidHandler(request);
+    return preventClosedFundingChallenge(rfsDetail.rfs.status, paymentResponse);
   } catch (error) {
     return errorResponseFrom(error);
   }

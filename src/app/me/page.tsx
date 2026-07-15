@@ -5,7 +5,8 @@ import { fetchAuthQuery, isAuthenticated } from "@/lib/auth-server"
 import { CopyText } from "@/components/copy-text"
 import { AsciiBox } from "@/components/ascii-box"
 import { RFSRow } from "@/components/rfs-row"
-import { baseUnitsToNumber } from "@/lib/view-models"
+import { baseUnitsToNumber, formatTokenAmount } from "@/lib/view-models"
+import { PayoutWalletForm } from "@/components/payout-wallet-form"
 
 export const dynamic = "force-dynamic"
 
@@ -14,7 +15,7 @@ export const metadata: Metadata = { title: "Profile | Oboe" }
 export default async function ProfilePage() {
   if (!(await isAuthenticated())) {
     return (
-      <main className="max-w-3xl mx-auto px-4 py-16">
+      <div className="max-w-3xl mx-auto px-4 py-16">
         <AsciiBox title="auth required">
           <p className="text-sm text-muted-foreground font-mono">
             <Link href="/sign-in?next=%2Fme" className="underline underline-offset-2 text-foreground">
@@ -23,14 +24,14 @@ export default async function ProfilePage() {
             to view your profile, requests, contributions, and purchases.
           </p>
         </AsciiBox>
-      </main>
+      </div>
     )
   }
 
   const dashboard = await fetchAuthQuery(api.users.getDashboard, {})
 
   return (
-    <main className="max-w-3xl mx-auto px-4">
+    <div className="max-w-3xl mx-auto px-4">
       <div className="mt-8 mb-6">
         <h1 className="text-xl font-medium tracking-tight">{dashboard.user.name}</h1>
         {dashboard.user.walletAddress ? (
@@ -39,6 +40,16 @@ export default async function ProfilePage() {
           <p className="font-mono text-sm text-muted-foreground mt-1">no wallet linked yet</p>
         )}
       </div>
+
+      <AsciiBox title="testnet creator balance">
+        <p className="font-mono text-lg">
+          ${formatTokenAmount(baseUnitsToNumber(dashboard.claimablePayoutBaseUnits))} pathUSD
+        </p>
+        <p className="text-xs font-mono text-muted-foreground mt-1 mb-4">
+          Accounting only; this MVP does not claim an on-chain payout has occurred.
+        </p>
+        <PayoutWalletForm initialAddress={dashboard.user.walletAddress} />
+      </AsciiBox>
 
       <div className="mt-6">
         <AsciiBox title="my requests">
@@ -53,7 +64,7 @@ export default async function ProfilePage() {
                   scope: "",
                   fundingThreshold: baseUnitsToNumber(rfs.fundingThresholdBaseUnits),
                   currentAmount: baseUnitsToNumber(rfs.currentAmountBaseUnits),
-                  status: rfs.status === "cancelled" ? "fulfilled" : rfs.status,
+                  status: rfs.status,
                   authorId: dashboard.user.id,
                   claimantId: null,
                   createdAt: new Date().toISOString(),
@@ -80,7 +91,7 @@ export default async function ProfilePage() {
                 >
                   <span className="truncate min-w-0">{contrib.rfsTitle}</span>
                   <span className="text-muted-foreground ml-4 shrink-0">
-                    ${baseUnitsToNumber(contrib.amountBaseUnits).toFixed(2)}
+                    ${formatTokenAmount(baseUnitsToNumber(contrib.amountBaseUnits))}
                   </span>
                 </div>
               )
@@ -104,7 +115,7 @@ export default async function ProfilePage() {
                 >
                   <span className="truncate min-w-0">{purchase.skillTitle}</span>
                   <span className="text-muted-foreground ml-4 shrink-0">
-                    ${baseUnitsToNumber(purchase.amountBaseUnits).toFixed(3)}
+                    ${formatTokenAmount(baseUnitsToNumber(purchase.amountBaseUnits))}
                   </span>
                 </div>
               )
@@ -116,6 +127,6 @@ export default async function ProfilePage() {
           )}
         </AsciiBox>
       </div>
-    </main>
+    </div>
   )
 }

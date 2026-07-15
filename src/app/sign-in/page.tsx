@@ -13,9 +13,9 @@ export default async function SignInPage() {
   }
 
   return (
-    <main className="max-w-xl mx-auto px-4 py-8">
+    <div className="max-w-xl mx-auto px-4 py-8">
       <h1 className="text-xl font-medium tracking-tight mb-6">sign in</h1>
       <SignInForm />
-    </main>
+    </div>
   )
 }

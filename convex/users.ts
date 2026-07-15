@@ -1,9 +1,32 @@
 import { ConvexError, v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
-import { authComponent, createAuth } from "./auth";
+import { authComponent } from "./auth";
 
 const walletAddressValidator = /^0x[a-fA-F0-9]{40}$/;
+const zeroAddress = "0x0000000000000000000000000000000000000000";
+
+export const normalizePayoutWalletAddress = (walletAddress: string) => {
+  const normalizedWalletAddress = walletAddress.trim().toLowerCase();
+
+  if (
+    !walletAddressValidator.test(normalizedWalletAddress) ||
+    normalizedWalletAddress === zeroAddress
+  ) {
+    throw new ConvexError({
+      code: "INVALID_WALLET_ADDRESS",
+      message: "Wallet address must be a nonzero 0x-prefixed 40-hex string.",
+    });
+  }
+  return normalizedWalletAddress;
+};
+
+export const sumClaimablePayoutBaseUnits = (
+  rows: ReadonlyArray<{ netAmountBaseUnits: bigint; status: string }>,
+) =>
+  rows
+    .filter((row) => row.status === "claimable")
+    .reduce((sum, row) => sum + row.netAmountBaseUnits, BigInt(0));
 
 export const updateWallet = mutation({
   args: {
@@ -14,36 +37,34 @@ export const updateWallet = mutation({
     walletAddress: v.string(),
   }),
   handler: async (ctx, args) => {
-    const normalizedWalletAddress = args.walletAddress.trim().toLowerCase();
-
-    if (!walletAddressValidator.test(normalizedWalletAddress)) {
-      throw new ConvexError({
-        code: "INVALID_WALLET_ADDRESS",
-        message: "Wallet address must be a 0x-prefixed 40-hex string.",
-      });
-    }
-
-    const { auth, headers } = await authComponent.getAuth(createAuth, ctx);
-    const session = await auth.api.getSession({ headers });
-
-    if (!session?.user) {
+    const normalizedWalletAddress = normalizePayoutWalletAddress(args.walletAddress);
+    const user = await authComponent.safeGetAuthUser(ctx);
+    if (!user) {
       throw new ConvexError({
         code: "UNAUTHORIZED",
         message: "Authentication required.",
       });
     }
 
-    const updateBody: Record<string, string> = {
-      walletAddress: normalizedWalletAddress,
-    };
-
-    await auth.api.updateUser({
-      headers,
-      body: updateBody,
-    });
+    const existingWallet = await ctx.db
+      .query("payoutWallets")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .unique();
+    if (existingWallet) {
+      await ctx.db.patch(existingWallet._id, {
+        walletAddress: normalizedWalletAddress,
+        updatedAt: Date.now(),
+      });
+    } else {
+      await ctx.db.insert("payoutWallets", {
+        userId: user._id,
+        walletAddress: normalizedWalletAddress,
+        updatedAt: Date.now(),
+      });
+    }
 
     return {
-      userId: session.user.id,
+      userId: user._id,
       walletAddress: normalizedWalletAddress,
     };
   },
@@ -64,9 +85,7 @@ export const getDashboard = query({
         status: v.union(
           v.literal("open"),
           v.literal("funded"),
-          v.literal("fulfilled"),
           v.literal("published"),
-          v.literal("cancelled"),
         ),
         fundingThresholdBaseUnits: v.int64(),
         currentAmountBaseUnits: v.int64(),
@@ -88,6 +107,7 @@ export const getDashboard = query({
         amountBaseUnits: v.int64(),
       }),
     ),
+    claimablePayoutBaseUnits: v.int64(),
   }),
   handler: async (ctx) => {
     const user = await authComponent.safeGetAuthUser(ctx);
@@ -98,23 +118,48 @@ export const getDashboard = query({
       });
     }
 
-    const requests = await ctx.db
-      .query("rfs")
-      .withIndex("by_author", (q) => q.eq("authorUserId", user._id))
-      .order("desc")
-      .collect();
-
-    const contributions = await ctx.db
-      .query("contributions")
-      .withIndex("by_backer", (q) => q.eq("backerUserId", user._id))
-      .order("desc")
-      .collect();
-
-    const purchases = await ctx.db
-      .query("purchases")
-      .withIndex("by_buyer", (q) => q.eq("buyerUserId", user._id))
-      .order("desc")
-      .collect();
+    const [
+      requests,
+      contributions,
+      purchases,
+      payoutWallet,
+      fundingPayoutRows,
+      purchasePayoutRows,
+    ] = await Promise.all([
+      ctx.db
+        .query("rfs")
+        .withIndex("by_author", (q) => q.eq("authorUserId", user._id))
+        .order("desc")
+        .collect(),
+      ctx.db
+        .query("contributions")
+        .withIndex("by_backer", (q) => q.eq("backerUserId", user._id))
+        .order("desc")
+        .collect(),
+      ctx.db
+        .query("purchases")
+        .withIndex("by_buyer", (q) => q.eq("buyerUserId", user._id))
+        .order("desc")
+        .collect(),
+      ctx.db
+        .query("payoutWallets")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .unique(),
+      ctx.db
+        .query("payoutLedger")
+        .withIndex("by_researcher", (q) => q.eq("researcherUserId", user._id))
+        .collect(),
+      ctx.db
+        .query("payoutEntries")
+        .withIndex("by_researcher_status", (q) =>
+          q.eq("researcherUserId", user._id).eq("status", "claimable"),
+        )
+        .collect(),
+    ]);
+    const claimablePayoutBaseUnits = sumClaimablePayoutBaseUnits([
+      ...fundingPayoutRows,
+      ...purchasePayoutRows,
+    ]);
 
     const contributionRows = await Promise.all(
       contributions.map(async (contribution) => {
@@ -145,10 +190,7 @@ export const getDashboard = query({
       user: {
         id: user._id,
         name: user.name,
-        walletAddress:
-          "walletAddress" in user && typeof user.walletAddress === "string"
-            ? user.walletAddress
-            : null,
+        walletAddress: payoutWallet?.walletAddress ?? null,
       },
       requests: requests.map((rfs) => ({
         id: rfs._id,
@@ -159,6 +201,16 @@ export const getDashboard = query({
       })),
       contributions: contributionRows,
       purchases: purchaseRows,
+      claimablePayoutBaseUnits,
     };
+  },
+});
+
+export const getViewer = query({
+  args: {},
+  returns: v.union(v.object({ userId: v.string() }), v.null()),
+  handler: async (ctx) => {
+    const user = await authComponent.safeGetAuthUser(ctx);
+    return user ? { userId: user._id } : null;
   },
 });

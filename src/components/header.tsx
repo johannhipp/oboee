@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { authClient } from "@/lib/auth-client"
 
 const navLinks = [
@@ -38,18 +38,21 @@ const pixelBorder = [
 
 export function Header() {
   const pathname = usePathname()
+  const router = useRouter()
   const { data: session } = authClient.useSession()
   const nextPath = pathname === "/sign-in" ? "/me" : pathname
 
   const handleSignOut = async () => {
     await authClient.signOut()
+    router.push("/")
+    router.refresh()
   }
 
   return (
-    <header className="sticky top-0 z-50 flex justify-center pt-4 px-4">
-      <div style={{ filter: pixelBorder }}>
+    <header className="sticky top-0 z-50 flex justify-center pt-4 px-2 sm:px-4">
+      <div className="max-w-full" style={{ filter: pixelBorder }}>
         <nav
-          className="h-11 px-6 flex items-center gap-6 bg-white"
+          className="h-11 max-w-full px-3 sm:px-6 flex items-center gap-3 sm:gap-6 bg-white"
           style={{ clipPath: pixelClip }}
         >
           <Link href="/" className="text-foreground hover:text-muted-foreground transition-colors duration-150" title="oboe">
@@ -78,19 +81,22 @@ export function Header() {
               {label}
             </Link>
           ))}
-          <div className="ml-2 pl-3 border-l border-gray-200">
+          <div className="ml-0 sm:ml-2 pl-2 sm:pl-3 border-l border-gray-200 min-w-0">
             {session?.user ? (
               <button
                 type="button"
                 onClick={handleSignOut}
-                className="text-sm font-mono text-muted-foreground hover:text-foreground transition-colors duration-150"
+                className="block whitespace-nowrap text-sm font-mono text-muted-foreground hover:text-foreground transition-colors duration-150"
               >
-                {session.user.name} (sign out)
+                <span className="sm:hidden">sign out</span>
+                <span className="hidden max-w-28 truncate sm:block">
+                  {session.user.name} (sign out)
+                </span>
               </button>
             ) : (
               <Link
                 href={`/sign-in?next=${encodeURIComponent(nextPath)}`}
-                className="text-sm font-mono text-muted-foreground hover:text-foreground transition-colors duration-150"
+                className="whitespace-nowrap text-sm font-mono text-muted-foreground hover:text-foreground transition-colors duration-150"
               >
                 sign in
               </Link>

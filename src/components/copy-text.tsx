@@ -15,11 +15,11 @@ export function CopyText({ text, className }: { text: string; className?: string
     <button
       type="button"
       onClick={handleCopy}
-      className={`font-mono text-sm text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer inline-flex items-center gap-2 ${className ?? ""}`}
+      className={`max-w-full min-w-0 font-mono text-sm text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer inline-flex items-center gap-2 ${className ?? ""}`}
       title="copy"
     >
-      {text}
-      <span className="text-xs">{copied ? "copied" : ""}</span>
+      <span className="truncate">{text}</span>
+      <span className="shrink-0 text-xs">{copied ? "copied" : ""}</span>
     </button>
   )
 }

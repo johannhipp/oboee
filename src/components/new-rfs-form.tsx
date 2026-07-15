@@ -91,6 +91,7 @@ export function NewRfsForm() {
                 className={inputStyle}
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
+                required
               />
             </div>
 
@@ -108,6 +109,7 @@ export function NewRfsForm() {
                 className={inputStyle}
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
+                required
               />
             </div>
 
@@ -122,6 +124,7 @@ export function NewRfsForm() {
                 className={inputStyle}
                 value={scope}
                 onChange={(event) => setScope(event.target.value)}
+                required
               />
             </div>
 
@@ -150,6 +153,7 @@ export function NewRfsForm() {
                 className={`${inputStyle} max-w-xs`}
                 value={fundingGoal}
                 onChange={(event) => setFundingGoal(event.target.value)}
+                required
               />
             </div>
           </div>
