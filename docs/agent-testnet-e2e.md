@@ -1,56 +1,68 @@
-# Agent E2E on Tempo Moderato
+# Guarded agent smoke test on Tempo Moderato
 
-This is the supported one-shot agent demo for the MVP. It is testnet-only and every payment must remain below `$0.01`.
+This is a manual testnet run. It moves pathUSD only after a human verifies the challenge and types `PAY`. CI must never run it.
 
-## Prerequisites
+## Preconditions
 
-- Oboe is running with `MPP_NETWORK=tempo-moderato`.
-- `mppx` has a funded Tempo Moderato account.
-- Set `MPPX_ACCOUNT` explicitly. Do not let a script guess which wallet to spend from.
+- Oboe is configured with `MPP_NETWORK=tempo-moderato` and the expected escrow.
+- `npm ci` has installed the repository-pinned `mppx` binary.
+- The selected `MPPX_ACCOUNT` is a funded disposable Moderato account.
+- The operator independently knows the configured escrow address.
+- The amount remains `1..9000` base units.
 
 ```bash
 export OBOE_BASE_URL=http://127.0.0.1:3000
 export MPPX_ACCOUNT=oboe-demo
-export OBOE_EXPECTED_ESCROW_ADDRESS=<the-configured-testnet-escrow>
+export OBOE_EXPECTED_ESCROW_ADDRESS=<verified-testnet-escrow>
 ```
 
-## Discover
+## 1. Discover metadata
 
 ```bash
-curl --fail-with-body "$OBOE_BASE_URL/api/skills?status=open"
-curl --fail-with-body "$OBOE_BASE_URL/api/skills?status=published"
+curl --fail-with-body "$OBOE_BASE_URL/api/skills?status=open&limit=24"
+curl --fail-with-body "$OBOE_BASE_URL/api/skills?status=published&limit=24"
 ```
 
-Catalog and detail responses contain metadata only. They must not contain `contentMarkdown`.
+Choose one RFS ID and one skill ID. Catalog and detail responses must not contain `contentMarkdown`.
 
-## Fund one request
-
-Choose an open RFS ID and an amount between `0.000001` and `0.009` pathUSD:
+## 2. Inspect, then fund
 
 ```bash
-MPPX_ACCOUNT="$MPPX_ACCOUNT" scripts/pay.sh \
+./scripts/pay.sh --dry-run \
   POST "$OBOE_BASE_URL/api/rfs/<rfs-id>/fund" \
   '{"amount":"0.001"}'
 ```
 
-The script validates the unpaid `402` challenge. It refuses any method other than a Tempo charge, any chain other than `42431`, any token other than Moderato pathUSD, a recipient different from the explicitly configured escrow, or an amount outside the test cap. It signs that exact challenge and sends exactly one authorized retry; it never pays a second, freshly discovered challenge.
+Confirm the output reports chain `42431`, Moderato pathUSD, `1000` base units, and the expected escrow. Then run the same command without `--dry-run`; type `PAY` only after the facts still match.
 
-## Buy one published skill
+Expected persisted facts:
 
-Choose a published skill ID:
+- one accepted contribution and one global payment event for the challenge
+- the public funding total increases exactly once
+- the RFS remains open or transitions once to funded
+- an anonymous run records a payment reference, not a fabricated user ID
+
+## 3. Inspect, then purchase
 
 ```bash
-MPPX_ACCOUNT="$MPPX_ACCOUNT" scripts/pay.sh \
+./scripts/pay.sh --dry-run \
   GET "$OBOE_BASE_URL/api/skills/<skill-id>/content"
 ```
 
-The successful response includes `contentMarkdown`, purchase metadata, and a receipt reference. An anonymous paid response is one-shot; to persist access to an Oboe account, begin the 402 flow while signed in and use the exact command shown in the browser.
+Review the same safety facts, repeat without `--dry-run`, and confirm. The 200 response must include `contentMarkdown`, a purchase ID, receipt reference, and a `Payment-Receipt` header.
 
-## Pass criteria
+Expected persisted facts:
 
-- unpaid request returns `402` with `tempo`, `charge`, chain `42431`, pathUSD, expected recipient, and exact amount
-- one paid retry returns `200`
-- transaction receipt status is successful and its token transfer matches amount and escrow
-- funding updates the public RFS total once
-- purchase returns full content once while public metadata remains redacted
-- no mainnet endpoint, token, key, or transfer is used
+- one purchase, one global payment event, and one immutable purchase earning
+- no reusable access grant for an anonymous payment
+- public metadata remains redacted after the purchase
+- an exact retry creates no duplicate purchase or earning
+
+## 4. Reconcile
+
+- Compare the receipt's successful pathUSD transfer with the reported amount and escrow.
+- Confirm the dashboard labels creator value as unsettled testnet earnings.
+- Record only aggregate counts/totals in QA notes; do not copy user IDs, wallet values, credentials, or secrets.
+- Keep test records if they support QA. If cleanup is required, use a separately reviewed data operation rather than deleting source events ad hoc.
+
+Mainnet, production escrow custody, and creator settlement are deferred readiness projects. This smoke plan must not be adapted to them by changing only a URL or token.
