@@ -28,7 +28,7 @@ export const buildTempoPaymentCommand = ({
 
   return [
     ': "${MPPX_ACCOUNT:?Set MPPX_ACCOUNT to an explicitly selected Tempo Moderato account}"',
-    `AUTHORIZATION=$(npx --yes mppx sign --account "$MPPX_ACCOUNT" --rpc-url ${shellQuote(TEMPO_MODERATO_RPC_URL)} --challenge ${shellQuote(challenge)})`,
+    `AUTHORIZATION=$(./node_modules/.bin/mppx sign --account "$MPPX_ACCOUNT" --rpc-url ${shellQuote(TEMPO_MODERATO_RPC_URL)} --challenge ${shellQuote(challenge)})`,
     curlParts.join(" \\\n  "),
   ].join("\n");
 };

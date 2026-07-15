@@ -1,22 +1,17 @@
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
-import { assertServerSecret } from "./lib/secretBoundary";
+import { internalMutation, query } from "./_generated/server";
+import { TEMPO_MODERATO_PATH_USD } from "../shared/domain/tempo";
+import { rfsStatusValidator } from "./lib/validators";
 
-const MODERATO_PATH_USD = "0x20c0000000000000000000000000000000000000";
 
-export const seedCveDataset = mutation({
-  args: { seedSecret: v.string() },
+export const seedCveDataset = internalMutation({
+  args: {},
   returns: v.object({
     createdRfsIds: v.array(v.id("rfs")),
     reusedRfsIds: v.array(v.id("rfs")),
   }),
-  handler: async (ctx, args) => {
-    assertServerSecret(
-      args.seedSecret,
-      "OBOE_SEED_SECRET",
-      "Development seeds are not configured.",
-    );
+  handler: async (ctx) => {
     const definitions = [
       {
         title: "CVE chain: edge exhaustion -> origin desync",
@@ -91,7 +86,7 @@ export const seedCveDataset = mutation({
         fundingThresholdBaseUnits: def.fundingThresholdBaseUnits,
         minimumContributionBaseUnits: def.minimumContributionBaseUnits,
         currentAmountBaseUnits: def.currentAmountBaseUnits,
-        fundingTokenAddress: MODERATO_PATH_USD,
+        fundingTokenAddress: TEMPO_MODERATO_PATH_USD,
         status: def.status,
       });
 
@@ -124,17 +119,13 @@ export const listSeededRfs = query({
     v.object({
       id: v.id("rfs"),
       title: v.string(),
-      status: v.union(
-        v.literal("open"),
-        v.literal("funded"),
-        v.literal("published"),
-      ),
+      status: rfsStatusValidator,
       currentAmountBaseUnits: v.int64(),
       fundingThresholdBaseUnits: v.int64(),
     }),
   ),
   handler: async (ctx) => {
-    const rows = await ctx.db.query("rfs").order("desc").collect();
+    const rows = await ctx.db.query("rfs").order("desc").take(100);
     return rows
       .filter((row) => row.authorUserId === "seed:researcher:redteam")
       .map((row) => ({
@@ -147,10 +138,9 @@ export const listSeededRfs = query({
   },
 });
 
-export const publishFundedSeedRfs = mutation({
+export const publishFundedSeedRfs = internalMutation({
   args: {
     rfsId: v.id("rfs"),
-    seedSecret: v.string(),
   },
   returns: v.object({
     rfsId: v.id("rfs"),
@@ -158,11 +148,6 @@ export const publishFundedSeedRfs = mutation({
     status: v.literal("published"),
   }),
   handler: async (ctx, args) => {
-    assertServerSecret(
-      args.seedSecret,
-      "OBOE_SEED_SECRET",
-      "Development seeds are not configured.",
-    );
     const rfs = await ctx.db.get(args.rfsId);
     if (!rfs) {
       throw new Error("RFS not found");

@@ -10,7 +10,7 @@ const configureTestnet = () => {
     "0x1111111111111111111111111111111111111111";
   process.env.MPP_FUNDING_TOKEN_ADDRESS = PATH_USD;
   process.env.MPP_SECRET_KEY = "0123456789abcdef0123456789abcdef";
-  process.env.OBOE_PAYMENT_RECORDING_SECRET =
+  process.env.OBOE_SERVER_COMMAND_SECRET =
     "abcdef0123456789abcdef0123456789";
 };
 
@@ -79,11 +79,11 @@ describe("MPP testnet configuration", () => {
 
   it("fails closed when server-to-Convex payment recording is not configured", async () => {
     configureTestnet();
-    delete process.env.OBOE_PAYMENT_RECORDING_SECRET;
+    delete process.env.OBOE_SERVER_COMMAND_SECRET;
 
     const { getMppx } = await import("./mpp");
 
-    expect(() => getMppx()).toThrow("OBOE_PAYMENT_RECORDING_SECRET");
+    expect(() => getMppx()).toThrow("OBOE_SERVER_COMMAND_SECRET");
   });
 
   it("issues a Moderato challenge bound to the browser principal", async () => {

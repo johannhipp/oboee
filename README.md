@@ -1,20 +1,19 @@
 # Oboe
 
-Oboe is a compact marketplace for crowdfunded AI-agent skill files. A user creates a Request for Skill (RFS), people or agents fund it, a signed-in writer claims and submits it, and the skill is published automatically. Backers can read it through their account; everyone else can buy a one-shot copy over MPP.
+Oboe is a small marketplace for crowdfunded, agent-readable skill files. People and agents fund a Request for Skill (RFS), a signed-in researcher claims it, and the submitted Markdown becomes a published paid skill.
 
-The current product is deliberately an MVP. It does not include moderation, disputes, recovery, reviewer tooling, reputation, ranking, evaluation, applications, bonds, versioning, API keys, delegations, or automated payout settlement.
+The current product is a Tempo Moderato MVP. It includes public discovery, Better Auth accounts, MPP funding and purchases, account entitlements, immutable testnet earnings accounting, and a future payout-wallet preference. It does not execute creator payouts, accept mainnet funds, or implement moderation, disputes, recovery, reputation, delegated budgets, or review workflows.
 
-## Product flow
+## Local setup
 
-1. Browse and search public RFS and skill metadata.
-2. Sign in to create an RFS, claim a funded request, submit a skill, or save one payout wallet.
-3. Fund an open RFS with a Tempo Moderato pathUSD MPP payment below `$0.01`.
-4. Submit as the claimant; the MVP auto-publishes the skill.
-5. Read as its author/backer, or buy the content with one MPP payment below `$0.01`.
+Prerequisites:
 
-## Run locally
+- Node.js 24 and npm
+- a Convex development deployment
+- a Tempo Moderato escrow address
+- a funded testnet account only when manually running paid smoke tests
 
-Prerequisites: Node 24, a Convex development deployment, and a Tempo Moderato escrow address.
+Install and configure the application:
 
 ```bash
 npm ci
@@ -23,33 +22,44 @@ npx convex dev
 npm run dev
 ```
 
-Fill every required value in `.env.local`. Oboe fails closed unless `MPP_NETWORK=tempo-moderato`, chain `42431` pathUSD is selected, and the escrow/payment secrets are valid. Never reuse production secrets in local development.
+`.env.example` separates the required settings by purpose:
 
-Run the verification gates with:
+- site and Convex URLs for Better Auth
+- MPP network, recipient, pathUSD, and verifier secrets for Next.js
+- `SITE_URL` and `OBOE_SERVER_COMMAND_SECRET` in the Convex environment
+- optional fee sponsorship and guarded CLI settings
+
+Set Convex values with `npx convex env set NAME value`; do not put real secrets in committed files. Payment configuration is lazy so public metadata can render without it, but every paid route fails closed when a trusted setting is missing or invalid.
+
+## Verification
 
 ```bash
-npm test
-npm run typecheck
 npm run lint
+npm run typecheck
+npm test
 npm run build
 npm run test:e2e
+bash -n scripts/pay.sh
+./scripts/pay.sh --help
 ```
 
-## Payments
+Unit and browser tests do not move funds. The manual smoke plan in [`docs/agent-testnet-e2e.md`](docs/agent-testnet-e2e.md) does; review the network, token, recipient, account, and amount before authorizing it.
 
-`POST /api/rfs/:id/fund` and `GET /api/skills/:id/content` use HTTP 402 MPP challenges. The browser shows a copyable `mppx` command; agents can use [`scripts/pay.sh`](scripts/pay.sh). Funding and buying may be anonymous. If the first challenge was created while signed in, its signed principal grants the resulting contribution or purchase to that account even when the command-line retry has no browser cookie.
+## Product flow
 
-All current payments are testnet-only. Automated creator payout settlement is outside the MVP; the profile exposes a payout address and accounting balance without claiming that funds were transferred.
+1. Browse the bounded mixed marketplace of open/funded requests and published skill metadata.
+2. Sign in to create, claim, submit, or save a future payout destination.
+3. Fund an open request with `1..9000` Tempo Moderato pathUSD base units.
+4. The assigned claimant submits Markdown and the request publishes atomically.
+5. Authors and eligible account backers read persistently; other callers can purchase a one-shot copy through MPP.
+
+The profile reports **unsettled testnet earnings** from one immutable accounting table. It never claims those entries were transferred or are currently claimable on-chain.
 
 ## Documentation
 
-- [`docs/spec.md`](docs/spec.md): current product contract and explicit non-goals
-- [`docs/backend-integration.md`](docs/backend-integration.md): implemented boundaries and deployment configuration
-- [`docs/agent-testnet-e2e.md`](docs/agent-testnet-e2e.md): one-shot agent payment demo
-- [`docs/qa/mvp-dogfood-20260715.md`](docs/qa/mvp-dogfood-20260715.md): current QA evidence
-
-## Deployment warning
-
-The MVP schema is intentionally smaller than the previous policy-v2 prototype. Do not deploy it over a policy-v2 Convex production deployment without a reviewed backup and migration plan. QA uses a separate development deployment.
-
-Stack: Next.js 16.2, React 19, Convex, Better Auth, TypeScript, and mppx on Tempo Moderato.
+- [`docs/spec.md`](docs/spec.md): authoritative MVP product and domain contract
+- [`src/lib/api/contract.ts`](src/lib/api/contract.ts): executable HTTP route manifest
+- [`public/SKILL.md`](public/SKILL.md): concise agent procedure
+- [`docs/agent-testnet-e2e.md`](docs/agent-testnet-e2e.md): guarded manual Moderato smoke plan
+- [`convex/README.md`](convex/README.md): backend module and trust-boundary map
+- [`docs/qa/mvp-dogfood-20260715.md`](docs/qa/mvp-dogfood-20260715.md): current UI QA evidence

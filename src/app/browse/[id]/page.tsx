@@ -4,10 +4,10 @@ import { api } from "../../../../convex/_generated/api"
 import { AsciiBox } from "@/components/ascii-box"
 import { ProgressBar } from "@/components/progress-bar"
 import { StatusBadge } from "@/components/status-badge"
-import { RfsActions } from "@/components/rfs-actions"
+import { ActionPanel } from "@/components/rfs-actions/action-panel"
 import { CopyId } from "@/components/copy-id"
 import { fetchAuthQuery, isAuthenticated } from "@/lib/auth-server"
-import { baseUnitsToNumber, formatTokenAmount } from "@/lib/view-models"
+import { MoneyText } from "@/components/money-text"
 
 export const dynamic = "force-dynamic"
 
@@ -18,7 +18,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params
   try {
-    const detail = await fetchQuery(api.skills.get, { rfsId: id })
+    const detail = await fetchQuery(api.skills.getByRfs, { rfsId: id })
     return { title: detail.rfs ? `${detail.rfs.title} | Oboe` : "Not found | Oboe" }
   } catch {
     return { title: "Not found | Oboe" }
@@ -33,8 +33,8 @@ export default async function Page({
   const { id } = await params
   const signedIn = await isAuthenticated()
   const detailPromise = signedIn
-    ? fetchAuthQuery(api.skills.get, { rfsId: id })
-    : fetchQuery(api.skills.get, { rfsId: id })
+    ? fetchAuthQuery(api.skills.getByRfs, { rfsId: id })
+    : fetchQuery(api.skills.getByRfs, { rfsId: id })
 
   let detail: Awaited<typeof detailPromise>
   let contributions: Awaited<ReturnType<typeof fetchQuery<typeof api.rfs.listContributions>>>
@@ -62,8 +62,6 @@ export default async function Page({
   }
 
   const skill = detail.skill
-  const currentAmount = baseUnitsToNumber(rfs.currentAmountBaseUnits)
-  const fundingThreshold = baseUnitsToNumber(rfs.fundingThresholdBaseUnits)
   const displayStatus = rfs.status
 
   return (
@@ -97,7 +95,10 @@ export default async function Page({
 
       <div className="lg:w-72 lg:shrink-0 lg:sticky lg:top-20 lg:self-start">
         <AsciiBox title="funding">
-          <ProgressBar current={currentAmount} goal={fundingThreshold} />
+          <ProgressBar
+            current={rfs.currentAmountBaseUnits}
+            goal={rfs.fundingThresholdBaseUnits}
+          />
 
           <div className="mt-4 space-y-1 text-sm font-mono text-muted-foreground">
             <p>{contributions.length} backers</p>
@@ -111,17 +112,7 @@ export default async function Page({
             </p>
           </div>
 
-          <RfsActions
-            rfsId={rfs._id}
-            status={displayStatus}
-            canFund={detail.canFund}
-            canClaim={detail.canClaim}
-            canSubmit={detail.canSubmit}
-            canBuy={detail.canBuy}
-            skillId={skill?._id}
-            hasAccess={detail.hasAccess}
-            signedIn={signedIn}
-          />
+          <ActionPanel actions={detail.availableActions} signedIn={signedIn} />
 
           <div className="mt-4 border-t border-border pt-3">
             <h3 className="text-xs font-mono uppercase text-muted-foreground mb-2">
@@ -133,8 +124,15 @@ export default async function Page({
                   key={c.id}
                   className="flex justify-between font-mono text-sm"
                 >
-                  <CopyId id={c.backerUserId} className="text-sm" />
-                  <span>${formatTokenAmount(baseUnitsToNumber(c.amountBaseUnits))}</span>
+                  <CopyId
+                    id={
+                      c.contributor.kind === "user"
+                        ? c.contributor.userId
+                        : c.contributor.paymentReference
+                    }
+                    className="text-sm"
+                  />
+                  <MoneyText baseUnits={c.amountBaseUnits} />
                 </div>
               )
             })}

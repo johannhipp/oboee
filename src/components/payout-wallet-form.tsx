@@ -2,8 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-
-const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/
+import { normalizeEvmAddress } from "../../shared/domain/strings"
 
 interface PayoutWalletFormProps {
   initialAddress: string | null
@@ -17,9 +16,9 @@ export function PayoutWalletForm({ initialAddress }: PayoutWalletFormProps) {
 
   const saveWallet = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const normalized = walletAddress.trim()
-    if (!ADDRESS_PATTERN.test(normalized)) {
-      setMessage("Enter a 0x-prefixed 40-hex wallet address.")
+    const normalized = normalizeEvmAddress(walletAddress)
+    if (!normalized) {
+      setMessage("Enter a nonzero 0x-prefixed 40-hex wallet address.")
       return
     }
 

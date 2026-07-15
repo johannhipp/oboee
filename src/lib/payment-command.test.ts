@@ -13,6 +13,8 @@ describe("Tempo CLI payment handoff", () => {
 
     expect(command).toContain("Set MPPX_ACCOUNT to an explicitly selected Tempo Moderato account");
     expect(command).not.toContain("MPPX_ACCOUNT=main");
+    expect(command).not.toMatch(/npx\s+--yes/);
+    expect(command).toContain("./node_modules/.bin/mppx sign");
     expect(command).toContain("https://rpc.moderato.tempo.xyz");
     expect(command).toContain("mppx sign");
     expect(command).toContain("Payment abc'\"'\"'def");

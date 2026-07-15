@@ -5,6 +5,8 @@ set -euo pipefail
 MODERATO_CHAIN_ID="42431"
 MODERATO_PATH_USD="0x20c0000000000000000000000000000000000000"
 MODERATO_RPC_URL="${OBOE_MPP_RPC_URL:-https://rpc.moderato.tempo.xyz}"
+REPOSITORY_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+MPPX_BIN="${MPPX_BIN:-$REPOSITORY_ROOT/node_modules/.bin/mppx}"
 
 usage() {
   cat <<'EOF'
@@ -13,6 +15,8 @@ Make one guarded Oboe payment on Tempo Moderato.
 Usage:
   MPPX_ACCOUNT=<name> OBOE_EXPECTED_ESCROW_ADDRESS=<0x...> \
     ./scripts/pay.sh METHOD URL [JSON_BODY]
+  MPPX_ACCOUNT=<name> OBOE_EXPECTED_ESCROW_ADDRESS=<0x...> \
+    ./scripts/pay.sh --dry-run METHOD URL [JSON_BODY]
 
 Examples:
   MPPX_ACCOUNT=demo OBOE_EXPECTED_ESCROW_ADDRESS=0x... \
@@ -22,12 +26,20 @@ Examples:
 
 The script refuses non-Tempo, non-charge, non-Moderato, non-pathUSD, zero,
 or above-$0.009 challenges before asking mppx to sign or transfer anything.
+Dry-run fetches and validates the challenge, then asks the pinned mppx binary
+to parse it without signing or sending an authorized retry.
 EOF
 }
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
   exit 0
+fi
+
+DRY_RUN=false
+if [[ "${1:-}" == "--dry-run" ]]; then
+  DRY_RUN=true
+  shift
 fi
 
 METHOD="${1:-}"
@@ -38,6 +50,20 @@ EXPECTED_RECIPIENT="${OBOE_EXPECTED_ESCROW_ADDRESS:-}"
 
 if [[ -z "$METHOD" || -z "$URL" || -z "$ACCOUNT" || -z "$EXPECTED_RECIPIENT" ]]; then
   usage >&2
+  exit 2
+fi
+for command in curl jq node sed tr; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    echo "Required command is unavailable: $command" >&2
+    exit 2
+  fi
+done
+if [[ ! -x "$MPPX_BIN" ]]; then
+  echo "Pinned mppx binary is unavailable. Run npm install first." >&2
+  exit 2
+fi
+if ! node -e 'const value = new URL(process.argv[1]); if (value.protocol !== "http:" && value.protocol !== "https:") process.exit(1)' "$URL"; then
+  echo "URL must be an absolute HTTP(S) URL." >&2
   exit 2
 fi
 EXPECTED_RECIPIENT=$(printf '%s' "$EXPECTED_RECIPIENT" | tr '[:upper:]' '[:lower:]')
@@ -51,6 +77,10 @@ if [[ "$METHOD" != "GET" && "$METHOD" != "POST" ]]; then
 fi
 if [[ "$METHOD" == "POST" && -z "$BODY" ]]; then
   echo "POST requires a JSON body." >&2
+  exit 2
+fi
+if [[ -n "$BODY" ]] && ! node -e 'JSON.parse(process.argv[1])' "$BODY" >/dev/null 2>&1; then
+  echo "JSON_BODY must be valid JSON." >&2
   exit 2
 fi
 
@@ -122,7 +152,29 @@ fi
 
 echo "Verified Moderato challenge: $AMOUNT pathUSD base units to $RECIPIENT" >&2
 
-if ! AUTHORIZATION=$(npx --yes mppx sign \
+if [[ "$DRY_RUN" == "true" ]]; then
+  "$MPPX_BIN" sign \
+    --account "$ACCOUNT" \
+    --rpc-url "$MODERATO_RPC_URL" \
+    --dry-run true \
+    --challenge "$CHALLENGE" >/dev/null
+  echo "Dry-run complete; no credential was signed and no authorized retry was sent." >&2
+  exit 0
+fi
+
+if [[ "${OBOE_ASSUME_YES:-false}" != "true" ]]; then
+  if [[ ! -t 0 ]]; then
+    echo "Interactive confirmation is required; set OBOE_ASSUME_YES=true only after reviewing the challenge." >&2
+    exit 2
+  fi
+  read -r -p "Type PAY to authorize this testnet transfer: " CONFIRMATION
+  if [[ "$CONFIRMATION" != "PAY" ]]; then
+    echo "Payment cancelled." >&2
+    exit 1
+  fi
+fi
+
+if ! AUTHORIZATION=$("$MPPX_BIN" sign \
   --account "$ACCOUNT" \
   --rpc-url "$MODERATO_RPC_URL" \
   --challenge "$CHALLENGE"); then

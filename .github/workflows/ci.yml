@@ -32,5 +32,10 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Payment helper safety
+        run: |
+          bash -n scripts/pay.sh
+          ./scripts/pay.sh --help >/dev/null
+
       - name: Build
         run: npm run build

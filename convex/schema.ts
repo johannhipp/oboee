@@ -1,61 +1,31 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+import {
+  contributionFields,
+  earningEntryFields,
+  paymentEventFields,
+  purchaseFields,
+  rfsFields,
+  skillFields,
+} from "./lib/validators";
+
 export default defineSchema({
-  rfs: defineTable({
-    authorUserId: v.string(),
-    claimantUserId: v.optional(v.string()),
-    title: v.string(),
-    description: v.string(),
-    scope: v.string(),
-    tags: v.array(v.string()),
-    fundingThresholdBaseUnits: v.int64(),
-    minimumContributionBaseUnits: v.int64(),
-    currentAmountBaseUnits: v.int64(),
-    fundingTokenAddress: v.string(),
-    status: v.union(
-      v.literal("open"),
-      v.literal("funded"),
-      v.literal("published"),
-    ),
-  })
+  rfs: defineTable(rfsFields)
     .index("by_status", ["status"])
     .index("by_author", ["authorUserId"])
     .index("by_claimant", ["claimantUserId"]),
 
-  contributions: defineTable({
-    rfsId: v.id("rfs"),
-    backerUserId: v.string(),
-    amountBaseUnits: v.int64(),
-    currencyAddress: v.string(),
-    challengeId: v.string(),
-    receiptReference: v.string(),
-    status: v.literal("accepted"),
-  })
+  contributions: defineTable(contributionFields)
     .index("by_rfs", ["rfsId"])
     .index("by_backer", ["backerUserId"])
     .index("by_challengeId", ["challengeId"]),
 
-  skills: defineTable({
-    rfsId: v.id("rfs"),
-    authorUserId: v.string(),
-    contentMarkdown: v.string(),
-    summary: v.string(),
-    tags: v.array(v.string()),
-    purchasePriceBaseUnits: v.int64(),
-    status: v.literal("published"),
-  })
+  skills: defineTable(skillFields)
     .index("by_rfs", ["rfsId"])
     .index("by_status", ["status"]),
 
-  purchases: defineTable({
-    skillId: v.id("skills"),
-    buyerUserId: v.string(),
-    amountBaseUnits: v.int64(),
-    currencyAddress: v.string(),
-    challengeId: v.string(),
-    receiptReference: v.string(),
-  })
+  purchases: defineTable(purchaseFields)
     .index("by_skill", ["skillId"])
     .index("by_buyer", ["buyerUserId"])
     .index("by_challengeId", ["challengeId"]),
@@ -77,43 +47,12 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 
-  payoutLedger: defineTable({
-    rfsId: v.id("rfs"),
-    researcherUserId: v.string(),
-    grossAmountBaseUnits: v.int64(),
-    platformFeeBaseUnits: v.int64(),
-    netAmountBaseUnits: v.int64(),
-    status: v.literal("claimable"),
-    receiptReference: v.optional(v.string()),
-  })
-    .index("by_rfs", ["rfsId"])
-    .index("by_researcher", ["researcherUserId"])
-    .index("by_status", ["status"]),
-
-  payoutEntries: defineTable({
-    rfsId: v.id("rfs"),
-    researcherUserId: v.string(),
-    source: v.union(v.literal("funding"), v.literal("purchase")),
-    grossAmountBaseUnits: v.int64(),
-    platformFeeBaseUnits: v.int64(),
-    netAmountBaseUnits: v.int64(),
-    status: v.literal("claimable"),
-  })
-    .index("by_researcher_status", ["researcherUserId", "status"])
+  earningEntries: defineTable(earningEntryFields)
+    .index("by_source_key", ["sourceKey"])
+    .index("by_researcher_currency", ["researcherUserId", "currencyAddress"])
     .index("by_rfs", ["rfsId"]),
 
-  paymentEvents: defineTable({
-    type: v.union(
-      v.literal("fund"),
-      v.literal("buy"),
-    ),
-    resourceId: v.string(),
-    challengeId: v.string(),
-    receiptReference: v.string(),
-    amountBaseUnits: v.int64(),
-    currencyAddress: v.string(),
-    status: v.string(),
-  })
+  paymentEvents: defineTable(paymentEventFields)
     .index("by_challengeId", ["challengeId"])
     .index("by_type_resource", ["type", "resourceId"]),
 });

@@ -1,8 +1,9 @@
-export const TEMPO_MODERATO_CHAIN_ID = 42_431;
-export const TEMPO_MODERATO_PATH_USD =
-  "0x20c0000000000000000000000000000000000000" as const;
-export const TEMPO_MODERATO_RPC_URL = "https://rpc.moderato.tempo.xyz";
-export const MVP_MAX_PAYMENT_BASE_UNITS = BigInt(9_000);
-
-export const isMvpPaymentBaseUnits = (value: bigint) =>
-  value >= BigInt(1) && value <= MVP_MAX_PAYMENT_BASE_UNITS;
+export {
+  TEMPO_MODERATO_CHAIN_ID,
+  TEMPO_MODERATO_PATH_USD,
+  TEMPO_MODERATO_RPC_URL,
+} from "../../shared/domain/tempo";
+export {
+  isMvpPaymentBaseUnits,
+  MAX_MVP_PAYMENT_BASE_UNITS as MVP_MAX_PAYMENT_BASE_UNITS,
+} from "../../shared/domain/money";

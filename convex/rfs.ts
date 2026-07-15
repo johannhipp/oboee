@@ -2,59 +2,18 @@ import { ConvexError, v } from "convex/values";
 
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { authComponent } from "./auth";
-import { canSubmitRfs } from "./lib/capabilities";
-
-const moderatoPathUsd = "0x20c0000000000000000000000000000000000000";
-const maxMvpPaymentBaseUnits = BigInt(9_000);
-
-const rfsStatusValidator = v.union(
-  v.literal("open"),
-  v.literal("funded"),
-  v.literal("published"),
-);
-
-const rfsDocValidator = v.object({
-  _id: v.id("rfs"),
-  _creationTime: v.number(),
-  authorUserId: v.string(),
-  claimantUserId: v.optional(v.string()),
-  title: v.string(),
-  description: v.string(),
-  scope: v.string(),
-  tags: v.array(v.string()),
-  fundingThresholdBaseUnits: v.int64(),
-  minimumContributionBaseUnits: v.int64(),
-  currentAmountBaseUnits: v.int64(),
-  fundingTokenAddress: v.string(),
-  status: rfsStatusValidator,
-});
-
-const cleanTags = (tags: string[]) =>
-  Array.from(
-    new Set(
-      tags
-        .map((tag) => tag.trim().toLowerCase())
-        .filter((tag) => tag.length > 0),
-    ),
-  );
-
-const requireAuthedUserId = async (ctx: MutationCtx | QueryCtx) => {
-  const user = await authComponent.safeGetAuthUser(ctx);
-  if (!user) {
-    throw new ConvexError({
-      code: "UNAUTHORIZED",
-      message: "Authentication required.",
-    });
-  }
-  return user._id;
-};
-
-const computeFeeSplit = (grossAmountBaseUnits: bigint) => {
-  const platformFeeBaseUnits = grossAmountBaseUnits / BigInt(100);
-  const netAmountBaseUnits = grossAmountBaseUnits - platformFeeBaseUnits;
-  return { platformFeeBaseUnits, netAmountBaseUnits };
-};
+import { MAX_MVP_PAYMENT_BASE_UNITS } from "../shared/domain/money";
+import { normalizeTags } from "../shared/domain/strings";
+import { TEMPO_MODERATO_PATH_USD } from "../shared/domain/tempo";
+import { requireAuthedUserId } from "./lib/auth";
+import { recordEarning } from "./lib/earnings";
+import {
+  canClaimRfs,
+  canFundRfs,
+  canSubmitRfs,
+  fundingEarningSourceKey,
+} from "./lib/rfsDomain";
+import { rfsDocValidator, rfsStatusValidator } from "./lib/validators";
 
 const getRfsByIdOrThrow = async (ctx: MutationCtx | QueryCtx, rfsId: Doc<"rfs">["_id"]) => {
   const rfs = await ctx.db.get(rfsId);
@@ -86,7 +45,7 @@ export const create = mutation({
     const title = args.title.trim();
     const description = args.description.trim();
     const scope = args.scope.trim();
-    const tags = cleanTags(args.tags);
+    const tags = normalizeTags(args.tags);
     const fundingTokenAddress = args.fundingTokenAddress.trim().toLowerCase();
 
     if (!title) {
@@ -113,7 +72,7 @@ export const create = mutation({
         message: "Minimum contribution must be at least 1 base unit.",
       });
     }
-    if (args.minimumContributionBaseUnits > maxMvpPaymentBaseUnits) {
+    if (args.minimumContributionBaseUnits > MAX_MVP_PAYMENT_BASE_UNITS) {
       throw new ConvexError({
         code: "INVALID_MINIMUM_CONTRIBUTION",
         message: "Minimum contribution must not exceed 9000 testnet base units.",
@@ -125,7 +84,7 @@ export const create = mutation({
         message: "Minimum contribution cannot exceed funding threshold.",
       });
     }
-    if (fundingTokenAddress !== moderatoPathUsd) {
+    if (fundingTokenAddress !== TEMPO_MODERATO_PATH_USD) {
       throw new ConvexError({
         code: "INVALID_TOKEN_ADDRESS",
         message: "Funding token must be Tempo Moderato pathUSD.",
@@ -150,7 +109,7 @@ export const create = mutation({
   },
 });
 
-export const get = query({
+export const getPublic = query({
   args: {
     rfsId: v.string(),
   },
@@ -169,43 +128,10 @@ export const get = query({
     }
 
     const hasClaimant = Boolean(rfs.claimantUserId);
-    const canFund = rfs.status === "open";
-    const canClaim = rfs.status === "funded" && !hasClaimant;
+    const canFund = canFundRfs(rfs.status);
+    const canClaim = canClaimRfs(rfs);
 
     return { rfs, canFund, canClaim, hasClaimant };
-  },
-});
-
-export const getPublic = get;
-
-export const list = query({
-  args: {
-    status: v.optional(rfsStatusValidator),
-    authorId: v.optional(v.string()),
-  },
-  returns: v.array(rfsDocValidator),
-  handler: async (ctx, args) => {
-    if (args.authorId) {
-      const docs = await ctx.db
-        .query("rfs")
-        .withIndex("by_author", (q) => q.eq("authorUserId", args.authorId!))
-        .order("desc")
-        .collect();
-      if (!args.status) {
-        return docs;
-      }
-      return docs.filter((doc) => doc.status === args.status);
-    }
-
-    if (args.status) {
-      return await ctx.db
-        .query("rfs")
-        .withIndex("by_status", (q) => q.eq("status", args.status!))
-        .order("desc")
-        .collect();
-    }
-
-    return await ctx.db.query("rfs").order("desc").collect();
   },
 });
 
@@ -216,7 +142,13 @@ export const listContributions = query({
   returns: v.array(
     v.object({
       id: v.id("contributions"),
-      backerUserId: v.string(),
+      contributor: v.union(
+        v.object({ kind: v.literal("user"), userId: v.string() }),
+        v.object({
+          kind: v.literal("anonymous"),
+          paymentReference: v.string(),
+        }),
+      ),
       amountBaseUnits: v.int64(),
       createdAt: v.number(),
     }),
@@ -230,13 +162,19 @@ export const listContributions = query({
       .query("contributions")
       .withIndex("by_rfs", (q) => q.eq("rfsId", rfsId))
       .order("desc")
-      .collect();
+      .take(50);
 
     return rows
       .filter((row) => row.status === "accepted")
       .map((row) => ({
         id: row._id,
-        backerUserId: row.backerUserId,
+        contributor: row.backerUserId
+          ? { kind: "user" as const, userId: row.backerUserId }
+          : {
+              kind: "anonymous" as const,
+              paymentReference:
+                row.anonymousPaymentReference ?? row.challengeId,
+            },
         amountBaseUnits: row.amountBaseUnits,
         createdAt: row._creationTime,
       }));
@@ -303,7 +241,7 @@ export const submit = mutation({
     const callerUserId = await requireAuthedUserId(ctx);
     const contentMarkdown = args.contentMarkdown.trim();
     const summary = args.summary.trim();
-    const tags = cleanTags(args.tags);
+    const tags = normalizeTags(args.tags);
 
     if (!contentMarkdown) {
       throw new ConvexError({
@@ -323,7 +261,7 @@ export const submit = mutation({
         message: "Purchase price must be at least 1 base unit.",
       });
     }
-    if (args.purchasePriceBaseUnits > maxMvpPaymentBaseUnits) {
+    if (args.purchasePriceBaseUnits > MAX_MVP_PAYMENT_BASE_UNITS) {
       throw new ConvexError({
         code: "INVALID_PRICE",
         message: "Purchase price must not exceed 9000 testnet base units.",
@@ -355,20 +293,20 @@ export const submit = mutation({
       .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
       .first();
 
-    let skillId = existingSkill?._id;
+    const skillId = existingSkill
+      ? existingSkill._id
+      : await ctx.db.insert("skills", {
+          rfsId: rfs._id,
+          authorUserId: callerUserId,
+          contentMarkdown,
+          summary,
+          tags,
+          purchasePriceBaseUnits: args.purchasePriceBaseUnits,
+          status: "published",
+        });
 
     if (existingSkill) {
       await ctx.db.patch(existingSkill._id, {
-        authorUserId: callerUserId,
-        contentMarkdown,
-        summary,
-        tags,
-        purchasePriceBaseUnits: args.purchasePriceBaseUnits,
-        status: "published",
-      });
-    } else {
-      skillId = await ctx.db.insert("skills", {
-        rfsId: rfs._id,
         authorUserId: callerUserId,
         contentMarkdown,
         summary,
@@ -393,7 +331,10 @@ export const submit = mutation({
         continue;
       }
       grossAmountBaseUnits += contribution.amountBaseUnits;
-      if (contribution.amountBaseUnits >= rfs.minimumContributionBaseUnits) {
+      if (
+        contribution.backerUserId &&
+        contribution.amountBaseUnits >= rfs.minimumContributionBaseUnits
+      ) {
         qualifyingBackers.add(contribution.backerUserId);
       }
     }
@@ -401,39 +342,29 @@ export const submit = mutation({
     for (const userId of qualifyingBackers) {
       const existingGrant = await ctx.db
         .query("accessGrants")
-        .withIndex("by_user_skill", (q) => q.eq("userId", userId).eq("skillId", skillId!))
+        .withIndex("by_user_skill", (q) => q.eq("userId", userId).eq("skillId", skillId))
         .first();
       if (!existingGrant) {
         await ctx.db.insert("accessGrants", {
           userId,
-          skillId: skillId!,
+          skillId,
           source: "backer_unlock",
         });
       }
     }
 
-    const existingPayoutLedger = await ctx.db
-      .query("payoutLedger")
-      .withIndex("by_rfs", (q) => q.eq("rfsId", rfs._id))
-      .first();
-
-    if (!existingPayoutLedger) {
-      const { platformFeeBaseUnits, netAmountBaseUnits } =
-        computeFeeSplit(grossAmountBaseUnits);
-
-      await ctx.db.insert("payoutLedger", {
-        rfsId: rfs._id,
-        researcherUserId: callerUserId,
-        grossAmountBaseUnits,
-        platformFeeBaseUnits,
-        netAmountBaseUnits,
-        status: "claimable",
-      });
-    }
+    await recordEarning(ctx, {
+      sourceKey: fundingEarningSourceKey(rfs._id),
+      rfsId: rfs._id,
+      researcherUserId: callerUserId,
+      sourceKind: "funding",
+      grossAmountBaseUnits,
+      currencyAddress: rfs.fundingTokenAddress,
+    });
 
     return {
       rfsId: rfs._id,
-      skillId: skillId!,
+      skillId,
       nextState: "published" as const,
     };
   },

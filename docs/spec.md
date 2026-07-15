@@ -1,102 +1,73 @@
 # Oboe marketplace MVP contract
 
-This document is the acceptance boundary for the current product. A feature not listed under “In scope” is not required merely because it appeared in an earlier prototype or QA report.
+This document is the product and domain authority for the current implementation. The executable HTTP authority is `src/lib/api/contract.ts`.
 
-## Product thesis
+## Scope
 
-Specialists can turn narrow expertise into agent-readable Markdown. Demand is proven before the work is written: someone publishes an RFS, others fund it, a writer fulfills it, and the result becomes a paid skill.
+Oboe lets demand fund a narrow agent-readable deliverable before it is written. The implemented surface is:
 
-## In scope
+- one bounded, paginated public marketplace projection for open/funded requests and published skill metadata
+- text, status, author, and normalized-tag filters
+- email/password accounts through Better Auth
+- authenticated request creation, first-writer claiming, claimant-only submission, and automatic publication
+- Tempo Moderato MPP funding and fixed-price purchases
+- account grants for authors, eligible authenticated backers, and purchases bound to a stable account principal
+- one-shot content in the verified response for anonymous purchases
+- one validated future payout-destination preference per account
+- one immutable earnings store for funding and purchase accounting
 
-### Public catalog
+Full `contentMarkdown` is never part of public catalog or detail metadata.
 
-- Browse one mixed catalog of open/funded RFSs and published skills.
-- Search by text and filter by status or tags.
-- Read public metadata, status, funding progress, prices, and summaries.
-- Keep full skill Markdown out of every public metadata response.
+## Reachable lifecycle
 
-### Authenticated author and writer flow
-
-- Email/password sign-up and sign-in through Better Auth.
-- Create an RFS with title, description, scope, tags, threshold, and minimum contribution.
-- Claim a funded, unclaimed RFS; first valid claimant wins atomically.
-- Let only the claimant submit the skill.
-- Auto-publish on submit. There is no review state or reviewer role in this MVP.
-- Save one validated, nonzero EVM payout wallet per account.
-
-### Payment and entitlement flow
-
-- Fund an open RFS through an MPP `tempo` charge.
-- Transition `open -> funded` when accepted contributions reach the threshold.
-- Give the skill author and eligible backers account-based access after publication.
-- Sell a one-shot copy of published content to everyone else through MPP.
-- Record a signed-in principal in the challenge so a cookie-free CLI retry can grant account entitlement.
-- Make payment recording server-authorized, exact-amount, exact-token, and idempotent.
-- Return stable 400/401/402/403/404/409/503 error envelopes.
-
-### Testnet boundary
-
-- Network: Tempo Moderato, chain ID `42431`.
-- Currency: pathUSD at `0x20c0000000000000000000000000000000000000`.
-- Every funding and purchase charge is `1..9000` base units, below `$0.01`.
-- The application fails closed for any other network, token, missing recipient, or missing secret.
-
-### Payout accounting
-
-- Record creator earnings and the MVP 99/1 creator/platform split.
-- Display the accounting balance and saved wallet honestly.
-- Do not present an accounting status as an on-chain payout.
-
-## Lifecycle
-
-| State | Allowed action | Next state |
+| Current state | Valid action | Result |
 |---|---|---|
-| `open` | accepted funding | `open` or `funded` |
-| `funded` | one signed-in user claims | `funded` with claimant |
-| `funded` with claimant | claimant submits and auto-publishes | `published` |
-| `published` | entitled read or paid purchase | `published` |
+| `open` | accepted contribution | `open` or `funded` |
+| `funded`, unclaimed | authenticated claim | `funded` with claimant |
+| `funded`, assigned | assigned claimant submits | `published` with skill |
+| `published` | entitled read or exact-price purchase | `published` |
 
-## Access rules
+Claimant assignment is orthogonal to status. There are no draft, submitted, fulfilled, cancelled, rejected, locked, paid, or claimed states in the MVP.
 
-- Metadata is always public.
-- Full content is returned only to the skill author, an account with an access grant, or the verified paid request that created a purchase.
-- A paid anonymous request receives content in that one response. Persistent account access requires a challenge bound to a signed-in user.
-- Payment recording treats a challenge ID as globally single-use across funding and purchase. Exact re-entry at the recording boundary returns the original result; changed payment facts return `409 IDEMPOTENCY_CONFLICT`.
+## Payment boundary
 
-## Product surface
+The only accepted network and currency are Tempo Moderato (chain `42431`) and pathUSD at `0x20c0000000000000000000000000000000000000`. Funding and purchase charges are `1..9000` base units.
 
-Pages: `/`, `/browse`, `/browse/[id]`, `/new`, `/me`, `/sign-in`, and `/docs`.
+The paid flow has two independent trust checks:
 
-API routes:
+1. Next.js verifies the MPP credential and extracts immutable payment facts.
+2. Next.js signs a canonical, 30-second server command. `paymentIngress.record` verifies its HMAC, lifetime, principal, resource, amount, token, and global challenge replay before an atomic domain write.
 
-- `GET /api/skills`
-- `GET /api/skills/[id]`
-- `GET /api/skills/[id]/content`
-- `POST /api/rfs`
-- `GET /api/rfs/[id]`
-- `POST /api/rfs/[id]/fund`
-- `POST /api/rfs/[id]/claim`
-- `POST /api/rfs/[id]/submit`
-- `POST /api/me/wallet`
-- `/api/auth/*`
+No browser receives the command signature or server secret. Contribution and purchase helpers are not public Convex mutations. Exact retries return the original result; changed reuse returns `IDEMPOTENCY_CONFLICT`.
 
-## Explicitly out of scope
+An anonymous purchase has no stable returning identity, creates no `accessGrants` row, and receives content only in that paid response. A command bound to a Better Auth user may create persistent account access.
 
-- API keys, delegated authority, delegated budgets, credential recovery, or wallet recovery
-- applicant queues, application scoring, reviewer assignment, review bonds, or slashing
-- moderation, evidence bundles, automated evaluation, quality scoring, or approval gates
-- reputation, rankings, ratings, version history, update guarantees, or trust badges
-- disputes, refunds, appeals, arbitration, or legal/compliance workflows
-- admin consoles, operations dashboards, production observability programs, or policy migrations
-- automated on-chain payout settlement or payout claims
-- mainnet payment acceptance
+## Earnings and wallet semantics
 
-These may become separate, evidence-driven product proposals. They are not hidden MVP requirements.
+`earningEntries` is the sole accounting source. Each row has a stable funding or purchase source key, gross amount, floor-rounded one-percent platform fee, net amount, researcher, RFS, currency, and creation time. Source-key uniqueness makes retries idempotent.
 
-## Release criteria
+The dashboard sums these rows as `unsettledTestnetEarningsBaseUnits`. It does not call them paid, claimable, or settled. `payoutWallets` stores only a future destination preference; it is not proof of custody and no code transfers funds to it.
 
-1. Unit tests cover capabilities, payment validation, replay handling, seed boundaries, serialization, and money formatting.
-2. Typecheck, lint, and production build pass.
-3. Browser E2E covers public discovery, auth, wallet persistence, RFS creation, and the 402 handoff.
-4. At least one real Moderato funding payment and one real Moderato purchase are independently verified by transaction receipt.
-5. Desktop and mobile dogfood find no unresolved critical or high issue in the core flow.
+## HTTP contract
+
+Every route, method, auth policy, MPP policy, and resource kind is declared in `src/lib/api/contract.ts` and checked against the Next.js route tree. Request parsers inspect raw JSON and query parameters once. Public DTO mappers select fields explicitly and serialize base units as decimal strings.
+
+Known domain errors map to stable 400/401/403/404/409/503 envelopes. Unknown errors are logged server-side with a correlation ID and return a generic message.
+
+## Runtime configuration
+
+- Next.js server settings are parsed in `src/lib/env/server.ts`.
+- Convex settings are parsed in `convex/lib/env.ts`.
+- Runtime-neutral Tempo constants and domain policies live in `shared/domain/`.
+- Missing trusted settings fail closed on the route that needs them; secrets never use a `NEXT_PUBLIC_` name.
+
+## Explicit non-goals
+
+- mainnet acceptance or automated creator settlement
+- claims, refunds, disputes, custody, or private-key storage in the browser
+- API keys, delegation, budgets, credential recovery, or wallet recovery
+- moderation, reviewer assignment, evidence scoring, approval gates, bonds, or slashing
+- reputation, rankings, ratings, versions, or update guarantees
+- admin consoles or production migration tooling beyond an explicitly reviewed operation
+
+Paid smoke tests are manual and testnet-only. Normal CI must never sign a credential or move funds.

@@ -20,10 +20,10 @@ afterEach(async () => {
   );
 });
 
-const createMockNpx = async (body: string, exitCode = 0) => {
+const createMockMppx = async (body: string, exitCode = 0) => {
   const directory = await mkdtemp(join(tmpdir(), "oboe-pay-test-"));
   temporaryDirectories.push(directory);
-  const executable = join(directory, "npx");
+  const executable = join(directory, "mppx");
   await writeFile(
     executable,
     `#!/usr/bin/env bash\nprintf '%s\\n' '${body}'\nexit ${exitCode}\n`,
@@ -45,11 +45,13 @@ const challengeHeader = () => {
 };
 
 const runAgainstServer = async ({
-  mockNpxDirectory,
+  mockMppxDirectory,
+  dryRun = false,
   paidBody = JSON.stringify({ status: "ok", resourceId: "contribution-1" }),
   paidReceipt = "receipt-data",
 }: {
-  mockNpxDirectory: string;
+  mockMppxDirectory: string;
+  dryRun?: boolean;
   paidBody?: string;
   paidReceipt?: string | null;
 }) => {
@@ -77,13 +79,18 @@ const runAgainstServer = async ({
   try {
     const result = await execFileAsync(
       join(process.cwd(), "scripts/pay.sh"),
-      ["GET", `http://127.0.0.1:${address.port}/paid`],
+      [
+        ...(dryRun ? ["--dry-run"] : []),
+        "GET",
+        `http://127.0.0.1:${address.port}/paid`,
+      ],
       {
         env: {
           ...process.env,
           MPPX_ACCOUNT: "test-account",
           OBOE_EXPECTED_ESCROW_ADDRESS: ESCROW,
-          PATH: `${mockNpxDirectory}:${process.env.PATH ?? ""}`,
+          MPPX_BIN: join(mockMppxDirectory, "mppx"),
+          OBOE_ASSUME_YES: "true",
         },
       },
     );
@@ -99,8 +106,8 @@ const runAgainstServer = async ({
 
 describe("guarded Tempo payment helper", () => {
   it("reports success only with a receipt and application result", async () => {
-    const mockNpxDirectory = await createMockNpx("Payment credential-data");
-    const result = await runAgainstServer({ mockNpxDirectory });
+    const mockMppxDirectory = await createMockMppx("Payment credential-data");
+    const result = await runAgainstServer({ mockMppxDirectory });
 
     expect(result).not.toHaveProperty("error");
     expect(result.requestCount).toBe(2);
@@ -109,8 +116,8 @@ describe("guarded Tempo payment helper", () => {
   });
 
   it("sends no authorized retry when signing fails", async () => {
-    const mockNpxDirectory = await createMockNpx("signer unavailable", 1);
-    const result = await runAgainstServer({ mockNpxDirectory });
+    const mockMppxDirectory = await createMockMppx("signer unavailable", 1);
+    const result = await runAgainstServer({ mockMppxDirectory });
 
     expect(result).toHaveProperty("error");
     expect(result.requestCount).toBe(1);
@@ -120,9 +127,9 @@ describe("guarded Tempo payment helper", () => {
   });
 
   it("rejects a paid 200 response without a payment receipt", async () => {
-    const mockNpxDirectory = await createMockNpx("Payment credential-data");
+    const mockMppxDirectory = await createMockMppx("Payment credential-data");
     const result = await runAgainstServer({
-      mockNpxDirectory,
+      mockMppxDirectory,
       paidReceipt: null,
     });
 
@@ -130,6 +137,17 @@ describe("guarded Tempo payment helper", () => {
     expect(result.requestCount).toBe(2);
     expect("error" in result ? result.error?.stderr : "").toContain(
       "without a Payment-Receipt",
+    );
+  });
+
+  it("validates a challenge in dry-run mode without an authorized retry", async () => {
+    const mockMppxDirectory = await createMockMppx("dry-run ok");
+    const result = await runAgainstServer({ mockMppxDirectory, dryRun: true });
+
+    expect(result).not.toHaveProperty("error");
+    expect(result.requestCount).toBe(1);
+    expect("stderr" in result ? result.stderr : "").toContain(
+      "no credential was signed",
     );
   });
 });

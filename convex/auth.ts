@@ -5,11 +5,12 @@ import { betterAuth } from "better-auth/minimal";
 import authConfig from "./auth.config";
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
+import { getConvexSiteUrl } from "./lib/env";
 
 export const authComponent = createClient<DataModel>(components.betterAuth);
 
 export const createAuth = (ctx: GenericCtx<DataModel>) => {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  const siteUrl = getConvexSiteUrl();
   const trustedOrigins = [
     siteUrl,
     "http://localhost:3000",
