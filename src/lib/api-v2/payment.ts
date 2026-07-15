@@ -3,7 +3,7 @@ import { anyApi } from "convex/server";
 
 import { paymentReceiptPayload } from "../../../shared/authorization-envelope";
 import { signServerEnvelope } from "../../../shared/server-envelope";
-import { fetchPrincipalMutation, fetchPrincipalQuery, resolveApiAuthentication } from "@/lib/api-auth";
+import { ApiAuthenticationError, fetchPrincipalMutation, fetchPrincipalQuery, resolveApiAuthentication } from "@/lib/api-auth";
 import { getMppx } from "@/lib/mpp";
 import { v2Error, v2Success } from "./responses";
 import { requireCommandOrigin } from "./route";
@@ -94,6 +94,9 @@ export const fundingIntentRoute = async (request: Request, rfsId: string) => {
     const intent = await fetchPrincipalMutation(anyApi.paymentIntents.createFundingIntent, { rfsId, amountBaseUnits: BigInt(body.amountBaseUnits), idempotencyKey }, authentication) as Intent;
     return await paidIntentResponse(request, requestId, intent, authentication);
   } catch (error) {
+    if (error instanceof ApiAuthenticationError) {
+      return v2Error({ requestId, code: error.code, message: error.message, status: error.status });
+    }
     return v2Error({ requestId, code: "payment_intent_failed", message: error instanceof Error ? error.message : "Payment intent failed.", status: 400 });
   }
 };
@@ -109,11 +112,14 @@ export const purchaseIntentRoute = async (request: Request, skillId: string) => 
     const intent = await fetchPrincipalMutation(anyApi.paymentIntents.createPurchaseIntent, { skillId, skillVersionId: body.skillVersionId, idempotencyKey }, authentication) as Intent;
     return await paidIntentResponse(request, requestId, intent, authentication);
   } catch (error) {
+    if (error instanceof ApiAuthenticationError) {
+      return v2Error({ requestId, code: error.code, message: error.message, status: error.status });
+    }
     return v2Error({ requestId, code: "payment_intent_failed", message: error instanceof Error ? error.message : "Payment intent failed.", status: 400 });
   }
 };
 
-export const bondIntentRoute = async (request: Request) => {
+export const bondIntentRoute = async (request: Request, rfsId: string) => {
   const requestId = request.headers.get("x-request-id")?.trim() || crypto.randomUUID();
   try {
     const authentication = await resolveApiAuthentication(request);
@@ -121,9 +127,12 @@ export const bondIntentRoute = async (request: Request) => {
     const idempotencyKey = request.headers.get("idempotency-key")?.trim();
     if (!idempotencyKey) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
     const body = bondIntentSchema.parse(await request.clone().json());
-    const intent = await fetchPrincipalMutation(anyApi.paymentIntents.createBondIntent, { applicationId: body.applicationId, idempotencyKey }, authentication) as Intent;
+    const intent = await fetchPrincipalMutation(anyApi.paymentIntents.createBondIntent, { rfsId, applicationId: body.applicationId, idempotencyKey }, authentication) as Intent;
     return await paidIntentResponse(request, requestId, intent, authentication);
   } catch (error) {
+    if (error instanceof ApiAuthenticationError) {
+      return v2Error({ requestId, code: error.code, message: error.message, status: error.status });
+    }
     return v2Error({ requestId, code: "payment_intent_failed", message: error instanceof Error ? error.message : "Payment intent failed.", status: 400 });
   }
 };

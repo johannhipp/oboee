@@ -80,7 +80,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const title = resource ? (resource.kind === "rfs" ? resource.data.rfs.title : resource.data.title) : "Marketplace item";
   return { title: `${title} | Oboe`, alternates: { canonical: `/browse/${id}` } };
 }
-
 export default async function MarketplaceDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const resource = await loadResource(id);
@@ -90,12 +89,12 @@ export default async function MarketplaceDetail({ params }: { params: Promise<{ 
 
   if (resource.kind === "skill") {
     const skill = resource.data;
-    const purchase = skillCapabilities(skill.id, skill.versionId, skill.quarantineState === "clear").find((item) => item.action === "purchase");
-    if (!purchase) return <main className="mx-auto max-w-5xl py-10 text-sm text-muted-foreground">Purchase details are unavailable.</main>;
+    const purchase = skillCapabilities(skill.id, skill.versionId, skill.quarantineState === "clear", !skill.legacyImported).find((item) => item.action === "purchase" && item.allowed);
 
     return (
       <main className="mx-auto max-w-5xl py-8 sm:py-10">
         <Link href="/browse" className="font-mono text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground">← Marketplace</Link>
+        {skill.legacyImported ? <div role="status" className="mt-6 border border-amber-700 bg-amber-50 p-4 text-sm text-amber-950"><strong className="block font-mono uppercase">Imported policy-v1 content</strong>This historical record is read-only until a policy-v2 version is published.</div> : null}
         {skill.quarantineState !== "clear" ? <div role="alert" className="mt-6 border-y border-red-700 py-3 text-sm text-red-900"><strong className="mr-2 font-mono uppercase">{formatLabel(skill.quarantineState)}</strong>This version is not ready to purchase or execute until the hold is resolved.</div> : null}
         <div className="mt-6 grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
           <article className="min-w-0">
@@ -142,7 +141,7 @@ export default async function MarketplaceDetail({ params }: { params: Promise<{ 
               <h2 className="mt-2 text-base font-medium">Purchase this version</h2>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">The purchase refers to the exact published version identified below.</p>
               <p className="mt-4 font-mono text-xs text-muted-foreground">price · {formatUnits(skill.purchasePriceBaseUnits)}</p>
-              <SkillPurchaseAction capability={purchase} skillVersionId={skill.versionId} />
+              {purchase ? <SkillPurchaseAction capability={purchase} skillVersionId={skill.versionId} /> : <p className="mt-4 text-sm text-muted-foreground">Purchases are unavailable for imported policy-v1 content.</p>}
               <Link href={`/browse/${skill.rfsId}`} className="mt-4 inline-block font-mono text-xs underline underline-offset-4">Open source request</Link>
             </div>
             <TechnicalDetails summary="Machine reference" hint="Version and capabilities" className="mt-6">

@@ -14,10 +14,10 @@ export const resourceHandoff = (resource: { kind: "rfs" | "skill" | "author" | "
 
 export const searchHandoff = (query: { q?: string; status?: string; tags?: string[]; author?: string }) => {
   const params = new URLSearchParams();
-  if (query.q) params.set("q", query.q);
   if (query.status) params.set("status", query.status);
   for (const tag of query.tags ?? []) params.append("tag", tag);
   if (query.author) params.set("author", query.author);
   const suffix = params.size ? `?${params}` : "";
-  return `${discoveryHandoff()} Reproduce this discovery view at ${origin()}/api/v2/catalog${suffix}.`;
+  const localSearch = query.q ? ` The web-only text filter (${JSON.stringify(query.q)}) is applied to the loaded projections; v2 does not advertise a free-text q parameter.` : "";
+  return `${discoveryHandoff()} Reproduce the published-skill projection at ${origin()}/api/v2/catalog${suffix}.${localSearch}`;
 };

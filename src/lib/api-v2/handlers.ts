@@ -10,6 +10,7 @@ import { signServerEnvelope } from "../../../shared/server-envelope";
 import { buildPublicAuthorReadModel, buildPublicReviewReadModel, buildPublicRfsReadModel, buildPublicSkillReadModel } from "@/lib/read-models/public";
 import { applicationSchema, evaluationSchema, evidenceVerificationSchema, fixtureRegistrationSchema, fixtureUploadIntentSchema, postUseReviewSchema, rfsDraftSchema } from "./schemas/common";
 import { applicationCapabilities, assignmentCapabilities, disputeCapabilities, evaluationCapabilities, evidenceCapabilities, humanActionCapabilities, obligationCapabilities, operationCapabilities, reviewAssignmentCapabilities, reviewCapabilities, rfsCapabilities, skillCapabilities } from "./capabilities";
+import { isConvexId, parsePublicLimit } from "./public-params";
 import { v2Authenticated, v2Authorized, v2Command, v2Public } from "./route";
 import { v2Error, v2Success } from "./responses";
 
@@ -27,26 +28,31 @@ const ifMatch = (request: Request) => {
 
 export const getCatalog = v2Public(async ({ request, requestId }) => {
   const url = new URL(request.url);
-  const result = await fetchQuery(anyApi.reputation.catalog, { category: url.searchParams.get("category") ?? undefined, authorHandle: url.searchParams.get("author") ?? undefined, tags: url.searchParams.getAll("tag"), cursor: url.searchParams.get("cursor") ?? undefined, limit: Number(url.searchParams.get("limit") ?? 20) });
-  return v2Success({ requestId, data: result.items.map((item: Record<string, unknown>) => ({ ...item, capabilities: skillCapabilities(String(item.skillId), String(item.skillVersionId), item.quarantineState !== "quarantined") })), capabilities: [], links: { self: request.url }, page: { nextCursor: result.nextCursor } });
+  const result = await fetchQuery(anyApi.reputation.catalog, { category: url.searchParams.get("category") ?? undefined, authorHandle: url.searchParams.get("author") ?? undefined, tags: url.searchParams.getAll("tag"), cursor: url.searchParams.get("cursor") ?? undefined, limit: parsePublicLimit(request, 20) });
+  return v2Success({ requestId, data: result.items.map((item: Record<string, unknown>) => ({ ...item, capabilities: skillCapabilities(String(item.skillId), String(item.skillVersionId), item.quarantineState === "clear", item.policyVersion !== 1) })), capabilities: [], links: { self: request.url }, page: { nextCursor: result.nextCursor } });
 });
 
 export const getSkills = getCatalog;
 
 export const getSkill = (skillId: string) => v2Public(async ({ requestId }) => {
+  if (!isConvexId(skillId)) return v2Error({ requestId, code: "not_found", message: "Skill not found.", status: 404 });
   const result = await fetchQuery(anyApi.skills.getPublic, { skillId });
   if (!result) return v2Error({ requestId, code: "not_found", message: "Skill not found.", status: 404 });
   const versionId = String(result.skillVersionId);
-  return v2Success({ requestId, data: buildPublicSkillReadModel(result), capabilities: skillCapabilities(skillId, versionId, result.quarantineState !== "quarantined"), links: { reviews: `/api/v2/skills/${skillId}/reviews`, installs: `/api/v2/skills/${skillId}/installs`, author: `/authors/${result.authorHandle}` } });
+  return v2Success({ requestId, data: buildPublicSkillReadModel(result), capabilities: skillCapabilities(skillId, versionId, result.quarantineState === "clear", result.legacyImported !== true), links: { reviews: `/api/v2/skills/${skillId}/reviews`, installs: `/api/v2/skills/${skillId}/installs`, author: `/authors/${result.authorHandle}` } });
 });
 
 export const getSkillVersion = (skillId: string, versionId: string) => v2Public(async ({ requestId }) => {
+  if (!isConvexId(skillId) || !isConvexId(versionId)) return v2Error({ requestId, code: "not_found", message: "Published skill version not found.", status: 404 });
   const result = await fetchQuery(anyApi.skills.getVersionMetadata, { skillId, skillVersionId: versionId });
   if (!result) return v2Error({ requestId, code: "not_found", message: "Published skill version not found.", status: 404 });
-  return v2Success({ requestId, data: result, capabilities: skillCapabilities(skillId, versionId, result.quarantineState !== "quarantined"), links: { skill: `/api/v2/skills/${skillId}` } });
+  return v2Success({ requestId, data: result, capabilities: skillCapabilities(skillId, versionId, result.quarantineState === "clear", result.legacyImported !== true), links: { skill: `/api/v2/skills/${skillId}` } });
 });
 
-export const getSkillInstalls = (skillId: string) => v2Public(async ({ requestId }) => v2Success({ requestId, data: await fetchQuery(anyApi.skills.getInstallAggregate, { skillId }), capabilities: [], links: { skill: `/api/v2/skills/${skillId}` } }));
+export const getSkillInstalls = (skillId: string) => v2Public(async ({ requestId }) => {
+  if (!isConvexId(skillId)) return v2Error({ requestId, code: "not_found", message: "Skill not found.", status: 404 });
+  return v2Success({ requestId, data: await fetchQuery(anyApi.skills.getInstallAggregate, { skillId }), capabilities: [], links: { skill: `/api/v2/skills/${skillId}` } });
+});
 
 export const getSkillContent = (skillId: string, versionId: string) => v2Authenticated(async ({ requestId, authentication }) => {
   const result = await fetchPrincipalMutation(anyApi.purchases.redeemContent, { skillId, skillVersionId: versionId }, authentication);
@@ -59,17 +65,19 @@ export const getAuthor = (handle: string) => v2Public(async ({ requestId }) => {
 });
 
 export const getReview = (reviewId: string) => v2Public(async ({ requestId }) => {
+  if (!isConvexId(reviewId)) return v2Error({ requestId, code: "not_found", message: "Review not found.", status: 404 });
   const result = await fetchQuery(anyApi.postUseReviews.publicReview, { reviewId });
   return result ? v2Success({ requestId, data: buildPublicReviewReadModel(result), capabilities: reviewCapabilities(String(result.skillId), reviewId, result.state), links: { skill: `/api/v2/skills/${String(result.skillId)}` } }) : v2Error({ requestId, code: "not_found", message: "Review not found.", status: 404 });
 });
 
 export const listRfs = v2Public(async ({ request, requestId }) => {
   const url = new URL(request.url);
-  const result = await fetchQuery(anyApi.rfsV2.listPublic, { status: url.searchParams.get("status") ?? undefined, limit: Number(url.searchParams.get("limit") ?? 25) });
+  const result = await fetchQuery(anyApi.rfsV2.listPublic, { status: url.searchParams.get("status") ?? undefined, limit: parsePublicLimit(request, 25) });
   return v2Success({ requestId, data: result.map((item: Record<string, unknown>) => ({ ...item, capabilities: rfsCapabilities(String(item.rfsId), String(item.status)) })), capabilities: [], links: { self: request.url } });
 });
 
 export const getRfs = (rfsId: string) => v2Public(async ({ requestId }) => {
+  if (!isConvexId(rfsId)) return v2Error({ requestId, code: "not_found", message: "Policy-v2 RFS not found.", status: 404 });
   const result = await fetchQuery(anyApi.rfsV2.get, { rfsId });
   if (!result) return v2Error({ requestId, code: "not_found", message: "Policy-v2 RFS not found.", status: 404 });
   return v2Success({ requestId, data: buildPublicRfsReadModel(result), resourceVersion: result.rfs.resourceVersion, capabilities: rfsCapabilities(rfsId, result.rfs.status), links: { revisions: `/api/v2/rfs/${rfsId}/revisions`, events: `/api/v2/rfs/${rfsId}/events`, author: `/authors/${result.rfs.authorHandle}` }, headers: { etag: `"${result.rfs.resourceVersion ?? 1}"` } });
@@ -97,7 +105,10 @@ export const reviseRfs = (rfsId: string) => v2Command({ action: `revise_rfs:${rf
 
 export const cancelRfs = (rfsId: string) => v2Command({ action: `cancel_rfs:${rfsId}`, schema: z.object({}), handler: async ({ request, requestId, authentication }) => outcome({ requestId, data: { state: await fetchPrincipalMutation(anyApi.rfsV2.cancelDraft, { rfsId, expectedResourceVersion: ifMatch(request) }, authentication) }, capabilities: rfsCapabilities(rfsId, "cancelled"), links: { self: `/api/v2/rfs/${rfsId}` }, resourceType: "rfs", resourceId: rfsId }) });
 
-export const getRfsRevisions = (rfsId: string) => v2Public(async ({ requestId }) => v2Success({ requestId, data: await fetchQuery(anyApi.rfsV2.listRevisions, { rfsId }), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }));
+export const getRfsRevisions = (rfsId: string) => v2Public(async ({ requestId }) => {
+  if (!isConvexId(rfsId)) return v2Error({ requestId, code: "not_found", message: "Policy-v2 RFS not found.", status: 404 });
+  return v2Success({ requestId, data: await fetchQuery(anyApi.rfsV2.listRevisions, { rfsId }), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } });
+});
 
 export const getApplicationEligibility = (rfsId: string) => v2Authenticated(async ({ requestId, authentication }) => v2Success({ requestId, data: await fetchPrincipalQuery(anyApi.applications.eligibility, { rfsId }, authentication), capabilities: rfsCapabilities(rfsId, "funded"), links: { applications: `/api/v2/rfs/${rfsId}/applications` } }));
 
@@ -127,7 +138,7 @@ export const submitSkill = (rfsId: string) => v2Command({ action: `submit_skill:
 
 export const getEvaluationWorkspace = (rfsId: string) => v2Authenticated(async ({ requestId, authentication }) => v2Success({ requestId, data: await fetchPrincipalQuery(anyApi.evaluationV2.getWorkspace, { rfsId }, authentication), capabilities: rfsCapabilities(rfsId, "evaluation_open"), links: { evaluations: `/api/v2/rfs/${rfsId}/evaluations`, evidence: `/api/v2/rfs/${rfsId}/evidence` } }));
 
-export const listEvaluations = (rfsId: string) => v2Public(async ({ requestId }) => { const rows = await fetchQuery(anyApi.evaluationV2.listPublic, { rfsId }); return v2Success({ requestId, data: rows.map((item: Record<string, unknown>) => ({ ...item, capabilities: evaluationCapabilities(rfsId, String(item.evaluationId), Boolean(item.active)) })), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }); });
+export const listEvaluations = (rfsId: string) => v2Public(async ({ requestId }) => { if (!isConvexId(rfsId)) return v2Error({ requestId, code: "not_found", message: "Policy-v2 RFS not found.", status: 404 }); const rows = await fetchQuery(anyApi.evaluationV2.listPublic, { rfsId }); return v2Success({ requestId, data: rows.map((item: Record<string, unknown>) => ({ ...item, capabilities: evaluationCapabilities(rfsId, String(item.evaluationId), Boolean(item.active)) })), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }); });
 
 export const createEvaluation = (rfsId: string) => v2Command({ action: `create_evaluation:${rfsId}`, schema: evaluationSchema, handler: async ({ requestId, authentication, input }) => {
   const result = await fetchPrincipalMutation(anyApi.evaluationV2.submit, { rfsId, ...input }, authentication);
@@ -139,7 +150,7 @@ export const supersedeEvaluation = (rfsId: string, evaluationId: string) => v2Co
   return outcome({ requestId, data: { evaluationId: id, supersedesEvaluationId: evaluationId }, links: { evaluations: `/api/v2/rfs/${rfsId}/evaluations` }, resourceType: "evaluation", resourceId: String(id), status: 201 });
 } });
 
-export const getEvidence = (rfsId: string) => v2Public(async ({ requestId }) => { const rows = await fetchQuery(anyApi.evidence.listPublicForRfs, { rfsId }); return v2Success({ requestId, data: rows.map((item: Record<string, unknown>) => ({ ...item, capabilities: evidenceCapabilities(rfsId, String(item.artifactId), item.scanState === "clean") })), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }); });
+export const getEvidence = (rfsId: string) => v2Public(async ({ requestId }) => { if (!isConvexId(rfsId)) return v2Error({ requestId, code: "not_found", message: "Policy-v2 RFS not found.", status: 404 }); const rows = await fetchQuery(anyApi.evidence.listPublicForRfs, { rfsId }); return v2Success({ requestId, data: rows.map((item: Record<string, unknown>) => ({ ...item, capabilities: evidenceCapabilities(rfsId, String(item.artifactId), item.scanState === "clean") })), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }); });
 
 export const listDisputes = (rfsId: string) => v2Authenticated(async ({ requestId, authentication }) => { const rows = await fetchPrincipalQuery(anyApi.evaluationV2.listDisputes, { rfsId }, authentication); return v2Success({ requestId, data: rows.map((item: Record<string, unknown>) => ({ ...item, capabilities: disputeCapabilities(rfsId, String(item._id), String(item.state)) })), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }); });
 
@@ -167,11 +178,11 @@ export const appendDisputeEvidence = (rfsId: string, disputeId: string) => v2Com
   },
 });
 
-export const getRfsEvents = (rfsId: string) => v2Public(async ({ requestId }) => v2Success({ requestId, data: await fetchQuery(anyApi.evaluationV2.listEvents, { rfsId }), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }));
+export const getRfsEvents = (rfsId: string) => v2Public(async ({ requestId }) => { if (!isConvexId(rfsId)) return v2Error({ requestId, code: "not_found", message: "Policy-v2 RFS not found.", status: 404 }); return v2Success({ requestId, data: await fetchQuery(anyApi.evaluationV2.listEvents, { rfsId }), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }); });
 
-export const getSettlement = (rfsId: string) => v2Public(async ({ requestId }) => v2Success({ requestId, data: await fetchQuery(anyApi.settlements.getRfsSettlement, { rfsId }), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }));
+export const getSettlement = (rfsId: string) => v2Public(async ({ requestId }) => { if (!isConvexId(rfsId)) return v2Error({ requestId, code: "not_found", message: "Policy-v2 RFS not found.", status: 404 }); return v2Success({ requestId, data: await fetchQuery(anyApi.settlements.getRfsSettlement, { rfsId }), capabilities: [], links: { rfs: `/api/v2/rfs/${rfsId}` } }); });
 
-export const listSkillReviews = (skillId: string) => v2Public(async ({ requestId }) => { const rows = await fetchQuery(anyApi.postUseReviews.listForSkill, { skillId }); return v2Success({ requestId, data: rows.map((item: Record<string, unknown>) => ({ ...item, capabilities: reviewCapabilities(skillId, String(item.reviewId), String(item.state)) })), capabilities: skillCapabilities(skillId), links: { skill: `/api/v2/skills/${skillId}` } }); });
+export const listSkillReviews = (skillId: string) => v2Public(async ({ requestId }) => { if (!isConvexId(skillId)) return v2Error({ requestId, code: "not_found", message: "Skill not found.", status: 404 }); const rows = await fetchQuery(anyApi.postUseReviews.listForSkill, { skillId }); return v2Success({ requestId, data: rows.map((item: Record<string, unknown>) => ({ ...item, capabilities: reviewCapabilities(skillId, String(item.reviewId), String(item.state)) })), capabilities: skillCapabilities(skillId), links: { skill: `/api/v2/skills/${skillId}` } }); });
 
 export const createSkillReview = (skillId: string) => v2Command({ action: `create_post_use_review:${skillId}`, schema: postUseReviewSchema, handler: async ({ requestId, authentication, input }) => {
   const result = await fetchPrincipalMutation(anyApi.postUseReviews.create, { skillId, ...input }, authentication);
@@ -331,6 +342,7 @@ export const registerFixture = v2Command({
 });
 
 export const getFixture = (fixtureVersionId: string) => v2Public(async ({ requestId }) => {
+  if (!isConvexId(fixtureVersionId)) return v2Error({ requestId, code: "not_found", message: "Fixture version not found.", status: 404 });
   const result = await fetchQuery(anyApi.fixtures.getMetadata, { fixtureVersionId });
   return result ? v2Success({ requestId, data: result, links: { content: `/api/v2/fixtures/${fixtureVersionId}/content` } }) : v2Error({ requestId, code: "not_found", message: "Fixture version not found.", status: 404 });
 });
@@ -366,20 +378,23 @@ export const resolveHumanAction = (actionId: string, approved: boolean) => v2Com
 });
 
 export const createRecoveryChallenge = v2Public(async ({ request, requestId }) => {
-  if (!request.headers.get("idempotency-key")?.trim()) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
+  const idempotencyKey = request.headers.get("idempotency-key")?.trim();
+  if (!idempotencyKey) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
   const input = z.object({ principalId: z.string().min(1), walletId: z.string().min(1) }).parse(await request.json().catch(() => ({})));
-  return v2Success({ requestId, data: await fetchMutation(anyApi.accountRecovery.createRecoveryChallenge, input), status: 201, links: { prove: "/api/v2/recovery/proofs" } });
+  return v2Success({ requestId, data: await fetchMutation(anyApi.accountRecovery.createRecoveryChallenge, { ...input, idempotencyKey }), status: 201, links: { prove: "/api/v2/recovery/proofs" } });
 });
 
 export const proveRecovery = v2Public(async ({ request, requestId }) => {
-  if (!request.headers.get("idempotency-key")?.trim()) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
+  const idempotencyKey = request.headers.get("idempotency-key")?.trim();
+  if (!idempotencyKey) return v2Error({ requestId, code: "idempotency_key_required", message: "Idempotency-Key is required.", status: 400 });
   const input = z.object({ challengeId: z.string().min(1), challenge: z.string().min(1), signature: z.string().min(1) }).parse(await request.json().catch(() => ({})));
-  const result = await fetchMutation(anyApi.accountRecovery.proveRecoveryWallet, input);
+  const result = await fetchMutation(anyApi.accountRecovery.proveRecoveryWallet, { ...input, idempotencyKey });
   return v2Success({ requestId, data: result, status: 202, links: { status: `/api/v2/recovery/${String(result.requestId)}` }, headers: { "retry-after": "60" } });
 });
 
 export const getRecoveryStatus = (recoveryId: string) => v2Public(async ({ request, requestId }) => {
+  if (!isConvexId(recoveryId)) return v2Error({ requestId, code: "not_found", message: "Recovery request not found.", status: 404 });
   const statusToken = request.headers.get("recovery-token") ?? "";
-  const result = await fetchMutation(anyApi.accountRecovery.getRecoveryStatus, { requestId: recoveryId, statusToken });
+  const result = await fetchQuery(anyApi.accountRecovery.getRecoveryStatus, { requestId: recoveryId, statusToken });
   return result ? v2Success({ requestId, data: result, links: { self: `/api/v2/recovery/${recoveryId}` }, headers: { "cache-control": "no-store", "retry-after": "60" } }) : v2Error({ requestId, code: "not_found", message: "Recovery request not found.", status: 404 });
 });

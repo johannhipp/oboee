@@ -14,6 +14,7 @@ import {
   type ContractCriterion,
 } from "./lib/policy";
 import { requirePrincipal } from "./lib/principals";
+import { fallbackAuthorHandle } from "./lib/publicIdentity";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -363,10 +364,12 @@ export const cancelDraft = mutation({
 });
 
 export const get = query({
-  args: { rfsId: v.id("rfs") },
+  args: { rfsId: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const rfs = await ctx.db.get(args.rfsId);
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    if (!rfsId) return null;
+    const rfs = await ctx.db.get(rfsId);
     if (!rfs || rfs.policyVersion !== POLICY_V2.version || !rfs.currentRevisionId) return null;
     const [revision, criteria, authorProfile, claimantProfile, assessment, skill, evidence] = await Promise.all([
       ctx.db.get(rfs.currentRevisionId),
@@ -388,7 +391,7 @@ export const get = query({
         status: rfs.status,
         policyVersion: rfs.policyVersion,
         riskTier: rfs.riskTier,
-        authorHandle: authorProfile?.handle ?? "verified-requester",
+        authorHandle: authorProfile?.handle ?? fallbackAuthorHandle(rfs.authorUserId),
         selectedAuthorHandle: claimantProfile?.handle,
         workEscrowBaseUnits: rfs.workEscrowBaseUnits,
         reviewReserveBaseUnits: rfs.reviewReserveBaseUnits,
@@ -457,19 +460,23 @@ export const get = query({
 });
 
 export const listRevisions = query({
-  args: { rfsId: v.id("rfs") },
+  args: { rfsId: v.string() },
   returns: v.any(),
-  handler: async (ctx, args) => (await ctx.db.query("rfsRevisions").withIndex("by_rfs_and_revisionNumber", (query) => query.eq("rfsId", args.rfsId)).collect()).map((revision) => ({
-    revisionId: revision._id,
-    revisionNumber: revision.revisionNumber,
-    status: revision.status,
-    targetEnvironments: revision.targetEnvironments,
-    fixtureDigest: revision.fixtureDigest,
-    contractDigest: revision.contractDigest,
-    createdAt: revision.createdAt,
-    frozenAt: revision.frozenAt,
-    cancelledAt: revision.cancelledAt,
-  })),
+  handler: async (ctx, args) => {
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    if (!rfsId) return [];
+    return (await ctx.db.query("rfsRevisions").withIndex("by_rfs_and_revisionNumber", (query) => query.eq("rfsId", rfsId)).collect()).map((revision) => ({
+      revisionId: revision._id,
+      revisionNumber: revision.revisionNumber,
+      status: revision.status,
+      targetEnvironments: revision.targetEnvironments,
+      fixtureDigest: revision.fixtureDigest,
+      contractDigest: revision.contractDigest,
+      createdAt: revision.createdAt,
+      frozenAt: revision.frozenAt,
+      cancelledAt: revision.cancelledAt,
+    }));
+  },
 });
 
 export const listPublic = query({

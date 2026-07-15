@@ -104,7 +104,7 @@ export const buildPublicRfsReadModel = (raw: unknown) => {
 
 const publicSkillRawSchema = z.object({
   skillId: opaqueId, skillVersionId: opaqueId, rfsId: opaqueId, title: z.string(), summary: z.string(), tags: z.array(z.string()), authorHandle: z.string(),
-  version: z.number(), contentHash: z.string(), digestAlgorithm: z.string().optional(), purchasePriceBaseUnits: z.bigint(), quarantineState: z.string(), status: marketplaceStatus, publishedAt: maybeDate,
+  version: z.number(), contentHash: z.string(), digestAlgorithm: z.string().optional(), policyVersion: z.number(), legacyImported: z.boolean(), purchasePriceBaseUnits: z.bigint(), quarantineState: z.string(), status: marketplaceStatus, publishedAt: maybeDate,
   quality: z.object({ score: z.number(), adjustedScore: z.number(), confidence: z.string(), independentCount: z.number(), computedAt: z.number() }).nullable(),
   uniqueVerifiedInstalls: z.number(),
   reviews: z.array(z.object({ reviewId: opaqueId, rating: z.number(), outcome: z.string(), tags: z.array(z.string()), text: z.string(), state: z.string(), createdAt: z.number() })),
@@ -123,6 +123,8 @@ export const buildPublicSkillReadModel = (raw: unknown) => {
     version: parsed.version,
     contentHash: parsed.contentHash,
     digestAlgorithm: parsed.digestAlgorithm,
+    policyVersion: parsed.policyVersion,
+    legacyImported: parsed.legacyImported,
     purchasePriceBaseUnits: parsed.purchasePriceBaseUnits.toString(),
     quarantineState: parsed.quarantineState,
     status: parsed.status,

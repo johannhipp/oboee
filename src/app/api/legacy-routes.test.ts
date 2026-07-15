@@ -6,6 +6,7 @@ const context = { params: Promise.resolve({ id: "resource-1" }) };
 describe("retired unversioned business API", () => {
   it.each([
     ["catalog", async () => (await import("./skills/route")).GET()],
+    ["unversioned RFS list", async () => (await import("./rfs/route")).GET()],
     ["skill detail", async () => (await import("./skills/[id]/route")).GET(request("/api/skills/resource-1", "GET"), context)],
     ["skill content", async () => (await import("./skills/[id]/content/route")).GET(request("/api/skills/resource-1/content", "GET"), context)],
     ["create RFS", async () => (await import("./rfs/route")).POST()],
@@ -19,6 +20,7 @@ describe("retired unversioned business API", () => {
     ["fund", async () => (await import("./rfs/[id]/fund/route")).POST(request("/api/rfs/resource-1/fund"), context)],
     ["payout claim", async () => (await import("./rfs/[id]/payout/claim/route")).POST()],
     ["wallet", async () => (await import("./me/wallet/route")).POST()],
+    ["versioned v1 catalog", async () => (await import("./v1/[...path]/route")).GET()],
   ])("returns 410 for %s", async (_name, invoke) => {
     const response = await invoke();
     expect(response.status).toBe(410);

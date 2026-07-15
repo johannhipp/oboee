@@ -24,7 +24,7 @@ const quarantine = async (ctx: MutationCtx, review: Doc<"postUseReviews">) => {
   const version = await ctx.db.get(review.skillVersionId);
   if (!skill || !version) return;
   const versions = await ctx.db.query("skillVersions").withIndex("by_skill", (query) => query.eq("skillId", skill._id)).collect();
-  const fallback = versions.filter((item) => item._id !== version._id && item.status === "published" && item.quarantineState !== "quarantined").sort((left, right) => right.version - left.version)[0];
+  const fallback = versions.filter((item) => item._id !== version._id && item.status === "published" && (item.quarantineState ?? "clear") === "clear").sort((left, right) => right.version - left.version)[0];
   await ctx.db.patch(version._id, { quarantineState: "held" });
   await ctx.db.patch(skill._id, { quarantineState: "held", safeFallbackVersionId: fallback?._id });
   await ctx.db.insert("quarantineEvents", { skillId: skill._id, skillVersionId: version._id, triggeringReviewId: review._id, priorState: skill.quarantineState ?? "clear", nextState: "held", reason: "verified_post_use_harmful_report", publicRedaction: "A verified harmful outcome is under trusted review.", salesHeld: true, purchasePayoutsHeld: true, safeFallbackVersionId: fallback?._id, occurredAt: Date.now() });
@@ -175,10 +175,12 @@ export const listModerationQueue = query({
 });
 
 export const publicReview = query({
-  args: { reviewId: v.id("postUseReviews") },
+  args: { reviewId: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const review = await ctx.db.get(args.reviewId);
+    const reviewId = ctx.db.normalizeId("postUseReviews", args.reviewId);
+    if (!reviewId) return null;
+    const review = await ctx.db.get(reviewId);
     if (!review || review.state === "removed") return null;
     const response = await ctx.db.query("postUseReviewResponses").withIndex("by_review", (query) => query.eq("reviewId", review._id)).unique();
     const profile = await ctx.db.query("publicProfiles").withIndex("by_principal", (query) => query.eq("principalId", review.reviewerPrincipalId)).unique();
@@ -187,7 +189,11 @@ export const publicReview = query({
 });
 
 export const listForSkill = query({
-  args: { skillId: v.id("skills") },
+  args: { skillId: v.string() },
   returns: v.any(),
-  handler: async (ctx, args) => (await ctx.db.query("postUseReviews").withIndex("by_skill_and_state", (query) => query.eq("skillId", args.skillId)).collect()).filter((review) => review.state !== "removed").map((review) => ({ reviewId: review._id, skillVersionId: review.skillVersionId, rating: review.rating, outcome: review.outcome, tags: review.tags, text: review.text, state: review.state, createdAt: review.createdAt })),
+  handler: async (ctx, args) => {
+    const skillId = ctx.db.normalizeId("skills", args.skillId);
+    if (!skillId) return [];
+    return (await ctx.db.query("postUseReviews").withIndex("by_skill_and_state", (query) => query.eq("skillId", skillId)).collect()).filter((review) => review.state !== "removed").map((review) => ({ reviewId: review._id, skillVersionId: review.skillVersionId, rating: review.rating, outcome: review.outcome, tags: review.tags, text: review.text, state: review.state, createdAt: review.createdAt }));
+  },
 });

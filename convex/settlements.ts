@@ -368,10 +368,12 @@ export const myObligations = query({
 });
 
 export const getRfsSettlement = query({
-  args: { rfsId: v.id("rfs") },
+  args: { rfsId: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const assessment = await ctx.db.query("payoutAssessments").withIndex("by_rfs", (query) => query.eq("rfsId", args.rfsId)).first();
+    const rfsId = ctx.db.normalizeId("rfs", args.rfsId);
+    if (!rfsId) return null;
+    const assessment = await ctx.db.query("payoutAssessments").withIndex("by_rfs", (query) => query.eq("rfsId", rfsId)).first();
     if (!assessment) return null;
     const obligations = await ctx.db.query("settlementObligations").withIndex("by_source", (query) => query.eq("sourceType", "rfs_work").eq("sourceId", String(assessment._id))).collect();
     return {

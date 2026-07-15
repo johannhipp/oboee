@@ -38,6 +38,7 @@ import type * as lib_operatorAudit from "../lib/operatorAudit.js";
 import type * as lib_paymentPolicy from "../lib/paymentPolicy.js";
 import type * as lib_policy from "../lib/policy.js";
 import type * as lib_principals from "../lib/principals.js";
+import type * as lib_publicIdentity from "../lib/publicIdentity.js";
 import type * as lib_reputationPolicy from "../lib/reputationPolicy.js";
 import type * as lib_stateMachines from "../lib/stateMachines.js";
 import type * as lib_validators from "../lib/validators.js";
@@ -99,6 +100,7 @@ declare const fullApi: ApiFromModules<{
   "lib/paymentPolicy": typeof lib_paymentPolicy;
   "lib/policy": typeof lib_policy;
   "lib/principals": typeof lib_principals;
+  "lib/publicIdentity": typeof lib_publicIdentity;
   "lib/reputationPolicy": typeof lib_reputationPolicy;
   "lib/stateMachines": typeof lib_stateMachines;
   "lib/validators": typeof lib_validators;

@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 
-import { internalMutation, mutation } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { recordOperatorAudit } from "./lib/operatorAudit";
 import { sha256Digest } from "./lib/contracts";
 import { requireActiveRole, requirePrincipal, requireRecentPasskey } from "./lib/principals";
@@ -8,15 +9,55 @@ import { verifyWalletSignature, walletMessageDigest } from "./lib/walletProof";
 
 const CHALLENGE_TTL_MS = 10 * 60 * 1_000;
 const RECOVERY_COOLING_MS = 72 * 60 * 60 * 1_000;
+const RECOVERY_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1_000;
+
+type RecoveryReservation<Result> =
+  | { replay: true; result: Result; recordId: Id<"idempotencyRecords"> }
+  | { replay: false; recordId: Id<"idempotencyRecords"> };
+
+const reserveRecoveryIdempotency = async <Result>(
+  ctx: MutationCtx,
+  args: { principalId: string; action: string; idempotencyKey: string; requestDigest: string },
+): Promise<RecoveryReservation<Result>> => {
+  const existing = await ctx.db
+    .query("idempotencyRecords")
+    .withIndex("by_principal_action_and_key", (query) => query.eq("principalId", args.principalId).eq("action", args.action).eq("idempotencyKey", args.idempotencyKey))
+    .unique();
+  if (existing) {
+    if (existing.requestDigest !== args.requestDigest) throw new ConvexError({ code: "IDEMPOTENCY_CONFLICT", message: "Idempotency key was used with a different recovery payload." });
+    if (existing.state === "completed" && existing.resultJson) return { replay: true, result: JSON.parse(existing.resultJson) as Result, recordId: existing._id };
+    if (existing.state === "pending") throw new ConvexError({ code: "COMMAND_IN_PROGRESS", message: "The idempotent recovery command is still in progress." });
+    await ctx.db.patch(existing._id, { state: "pending", errorCode: undefined, resultJson: undefined });
+    return { replay: false, recordId: existing._id };
+  }
+  const recordId = await ctx.db.insert("idempotencyRecords", {
+    principalId: args.principalId,
+    apiVersion: "v2",
+    action: args.action,
+    idempotencyKey: args.idempotencyKey,
+    requestDigest: args.requestDigest,
+    state: "pending",
+    expiresAt: Date.now() + RECOVERY_IDEMPOTENCY_TTL_MS,
+    createdAt: Date.now(),
+  });
+  return { replay: false, recordId };
+};
+
+const completeRecoveryIdempotency = async (ctx: MutationCtx, recordId: Id<"idempotencyRecords">, result: unknown) => {
+  await ctx.db.patch(recordId, { state: "completed", resultJson: JSON.stringify(result) });
+};
 
 export const createRecoveryChallenge = mutation({
-  args: { principalId: v.string(), walletId: v.id("principalWallets") },
+  args: { principalId: v.string(), walletId: v.id("principalWallets"), idempotencyKey: v.string() },
   returns: v.object({
     challengeId: v.id("accountRecoveryChallenges"),
     challenge: v.string(),
     expiresAt: v.number(),
   }),
   handler: async (ctx, args) => {
+    const requestDigest = sha256Digest({ principalId: args.principalId, walletId: String(args.walletId) });
+    const reservation = await reserveRecoveryIdempotency<{ challengeId: Id<"accountRecoveryChallenges">; challenge: string; expiresAt: number }>(ctx, { principalId: args.principalId, action: "recovery.create_challenge", idempotencyKey: args.idempotencyKey, requestDigest });
+    if (reservation.replay) return reservation.result;
     const wallet = await ctx.db.get(args.walletId);
     if (!wallet || wallet.principalId !== args.principalId || wallet.status === "revoked") {
       throw new ConvexError({ code: "NOT_FOUND", message: "Eligible recovery wallet not found." });
@@ -26,7 +67,11 @@ export const createRecoveryChallenge = mutation({
       .withIndex("by_principal_and_state", (query) => query.eq("principalId", args.principalId).eq("state", "pending"))
       .collect();
     const reusable = active.find((challenge) => challenge.walletId === wallet._id && challenge.expiresAt > Date.now());
-    if (reusable) return { challengeId: reusable._id, challenge: reusable.challenge, expiresAt: reusable.expiresAt };
+    if (reusable) {
+      const result = { challengeId: reusable._id, challenge: reusable.challenge, expiresAt: reusable.expiresAt };
+      await completeRecoveryIdempotency(ctx, reservation.recordId, result);
+      return result;
+    }
     const createdAt = Date.now();
     const expiresAt = createdAt + CHALLENGE_TTL_MS;
     const challengeId = await ctx.db.insert("accountRecoveryChallenges", {
@@ -50,7 +95,9 @@ export const createRecoveryChallenge = mutation({
       challenge,
       challengeDigest: walletMessageDigest(challenge),
     });
-    return { challengeId, challenge, expiresAt };
+    const result = { challengeId, challenge, expiresAt };
+    await completeRecoveryIdempotency(ctx, reservation.recordId, result);
+    return result;
   },
 });
 
@@ -59,6 +106,7 @@ export const proveRecoveryWallet = mutation({
     challengeId: v.id("accountRecoveryChallenges"),
     challenge: v.string(),
     signature: v.string(),
+    idempotencyKey: v.string(),
   },
   returns: v.object({ requestId: v.id("accountRecoveryRequests"), coolingOffUntil: v.number(), statusToken: v.string() }),
   handler: async (ctx, args) => {
@@ -66,6 +114,9 @@ export const proveRecoveryWallet = mutation({
     if (!challenge || challenge.state !== "pending" || challenge.expiresAt <= Date.now()) {
       throw new ConvexError({ code: "CHALLENGE_EXPIRED", message: "Recovery challenge expired or was consumed." });
     }
+    const requestDigest = sha256Digest({ challengeId: String(args.challengeId), challenge: args.challenge, signature: args.signature });
+    const reservation = await reserveRecoveryIdempotency<{ requestId: Id<"accountRecoveryRequests">; coolingOffUntil: number; statusToken: string }>(ctx, { principalId: challenge.principalId, action: "recovery.prove", idempotencyKey: args.idempotencyKey, requestDigest });
+    if (reservation.replay) return reservation.result;
     if (
       args.challenge !== challenge.challenge ||
       walletMessageDigest(args.challenge) !== challenge.challengeDigest
@@ -90,7 +141,9 @@ export const proveRecoveryWallet = mutation({
       )
       .first();
     if (active) {
-      return { requestId: active._id, coolingOffUntil: active.coolingOffUntil, statusToken: active.walletProofDigest };
+      const result = { requestId: active._id, coolingOffUntil: active.coolingOffUntil, statusToken: active.walletProofDigest };
+      await completeRecoveryIdempotency(ctx, reservation.recordId, result);
+      return result;
     }
     const createdAt = Date.now();
     const coolingOffUntil = createdAt + RECOVERY_COOLING_MS;
@@ -103,15 +156,19 @@ export const proveRecoveryWallet = mutation({
       createdAt,
     });
     await ctx.db.patch(challenge._id, { state: "consumed", consumedAt: createdAt });
-    return { requestId, coolingOffUntil, statusToken: challenge.challengeDigest };
+    const result = { requestId, coolingOffUntil, statusToken: challenge.challengeDigest };
+    await completeRecoveryIdempotency(ctx, reservation.recordId, result);
+    return result;
   },
 });
 
-export const getRecoveryStatus = mutation({
-  args: { requestId: v.id("accountRecoveryRequests"), statusToken: v.string() },
+export const getRecoveryStatus = query({
+  args: { requestId: v.string(), statusToken: v.string() },
   returns: v.union(v.null(), v.object({ status: v.string(), coolingOffUntil: v.number(), approvalCount: v.number(), completedAt: v.optional(v.number()), revokedKeyCount: v.optional(v.number()) })),
   handler: async (ctx, args) => {
-    const request = await ctx.db.get(args.requestId);
+    const requestId = ctx.db.normalizeId("accountRecoveryRequests", args.requestId);
+    if (!requestId) return null;
+    const request = await ctx.db.get(requestId);
     if (!request || request.walletProofDigest !== args.statusToken) return null;
     return { status: request.status, coolingOffUntil: request.coolingOffUntil, approvalCount: Number(Boolean(request.firstOperatorPrincipalId)) + Number(Boolean(request.secondOperatorPrincipalId)), completedAt: request.completedAt, revokedKeyCount: request.revokedKeyCount };
   },
